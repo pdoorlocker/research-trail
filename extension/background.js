@@ -550,6 +550,22 @@ async function moveNodes(nodeIds, toJourneyId) {
       });
     }
   }
+  // Landing in a real workspace makes these pages intentional research —
+  // backfill the summaries that Scratch-lite skipped (hooks follow via the
+  // summarize→hooks chain). This is the one choke point behind topic
+  // promotion, split acceptance, and manual moves.
+  const dest = await db.get('journeys', toJourneyId);
+  if (dest && !isScratch(dest)) {
+    let queued = 0;
+    for (const id of nodeIds) {
+      const n = await db.get('nodes', id);
+      if (n && !n.summary?.length && (n.text || n.excerpt)) {
+        await enqueueJob(toJourneyId, 'summarize', n.id);
+        queued++;
+      }
+    }
+    if (queued) kickQueue();
+  }
   notifyTrailUpdated(fromJourneyId);
   notifyTrailUpdated(toJourneyId);
   notifyTabsUpdated();
@@ -1032,9 +1048,14 @@ async function onPageCaptured(payload, sender) {
   await db.put('nodes', node);
 
   // Only queue AI work the first time we get real content for this node;
-  // revisits and already-summarized pages don't re-run.
+  // revisits and already-summarized pages don't re-run. In Scratch (lite
+  // mode), skip the expensive per-page summary entirely — auto-organization
+  // only needs embeddings, and pages get summarized later if they're ever
+  // promoted into a real workspace.
   if (!hadContent && !node.summary?.length && (node.text || node.excerpt)) {
-    await enqueueJob(activeJourneyId, 'summarize', node.id);
+    const journey = await db.get('journeys', activeJourneyId);
+    const lite = settings.scratchLite && isScratch(journey);
+    if (!lite) await enqueueJob(activeJourneyId, 'summarize', node.id);
     await enqueueJob(activeJourneyId, 'embed', node.id);
     kickQueue();
   }

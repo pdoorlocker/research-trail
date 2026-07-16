@@ -24,6 +24,7 @@ let topics = [];
 let selectedTopicId = null; // which Scratch topic's map is open (null = topic list)
 let activeSuggestion = null; // split suggestion being previewed
 let previewActive = false;
+let scratchLiteActive = false; // viewing Scratch while lite processing is on
 
 function isScratchJourney(j) {
   return j?.kind === 'scratch' || j?.name === 'Scratch';
@@ -133,6 +134,7 @@ async function loadData(id) {
   allNodes = (await db.getByIndex('nodes', 'byJourney', id)).sort((a, b) => a.createdAt - b.createdAt);
   edges = await db.getByIndex('edges', 'byJourney', id);
   const scratch = isScratchJourney(journey);
+  scratchLiteActive = scratch && (await getSettings()).scratchLite !== false;
   topics = scratch ? await db.getByIndex('topics', 'byJourney', id) : [];
   if (selectedTopicId && !topics.some((t) => t.id === selectedTopicId) && selectedTopicId !== '__unsorted') {
     selectedTopicId = null; // topic got merged away or deleted
@@ -157,7 +159,9 @@ async function loadData(id) {
   }
 
   // Pages summarized before handles existed: ask for a backfill once.
-  if (!hooksRequested.has(id)
+  // Not for Scratch — the condition matches excerpt-only pages, and lite
+  // mode deliberately avoids spending the chat model on ambient browsing.
+  if (!scratch && !hooksRequested.has(id)
       && allNodes.filter((n) => (n.summary?.length || n.excerpt) && !n.hook).length >= 2) {
     hooksRequested.add(id);
     send({ type: 'refresh-hooks', journeyId: id });
@@ -1447,9 +1451,13 @@ function renderDrawer() {
   } else {
     const li = document.createElement('li');
     li.className = 'muted';
-    li.textContent = node.text || node.excerpt
-      ? 'Waiting for Ollama to summarize…'
-      : 'No text captured for this page.';
+    if (!node.text && !node.excerpt) {
+      li.textContent = 'No text captured for this page.';
+    } else if (scratchLiteActive) {
+      li.textContent = 'Scratch pages skip summaries to save compute — Redo summarizes just this page; promoting the topic to a workspace summarizes everything.';
+    } else {
+      li.textContent = 'Waiting for Ollama to summarize…';
+    }
     summary.appendChild(li);
   }
 
@@ -1749,6 +1757,7 @@ function wireSettings() {
       simThreshold: parseFloat($('s-threshold').value),
       captureText: $('s-capture-text').checked,
       aiPaused: $('s-ai-paused').checked,
+      scratchLite: $('s-scratch-lite').checked,
       tabGroupSync: $('s-tab-groups').checked,
       autoReturnMinutes: Math.max(0, parseInt($('s-auto-return').value, 10) || 0),
       blocklist: $('s-blocklist').value.split('\n').map((l) => l.trim()).filter(Boolean),
@@ -1783,6 +1792,7 @@ async function openSettings() {
   $('s-threshold-val').textContent = s.simThreshold;
   $('s-capture-text').checked = s.captureText;
   $('s-ai-paused').checked = !!s.aiPaused;
+  $('s-scratch-lite').checked = s.scratchLite !== false;
   $('s-tab-groups').checked = !!s.tabGroupSync;
   $('s-auto-return').value = s.autoReturnMinutes ?? 30;
   $('s-blocklist').value = (s.blocklist || []).join('\n');

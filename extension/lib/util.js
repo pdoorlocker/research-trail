@@ -81,6 +81,7 @@ export const DEFAULT_SETTINGS = {
   aiPaused: false,
   tabGroupSync: true,
   autoReturnMinutes: 30, // fresh entry after this long a gap reverts to Scratch (0 = never)
+  scratchLite: true, // Scratch skips per-page summaries; pages get the full treatment when promoted
   blocklist: DEFAULT_BLOCKLIST,
 };
 
