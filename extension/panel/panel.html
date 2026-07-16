@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Research Trail</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header>
+    <select id="ws-select" title="Workspace"></select>
+    <button id="pause-btn" class="icon" title="Pause page capture (nothing gets recorded until you resume)"></button>
+    <button id="map-btn" class="icon" title="Open the full map">Map</button>
+    <button id="close-btn" class="icon" title="Close panel">Close</button>
+  </header>
+
+  <div id="suggest-note" hidden>
+    <span id="suggest-note-text"></span>
+    <button id="suggest-open">Review</button>
+  </div>
+
+  <div id="graph-wrap">
+    <div id="cy"></div>
+    <div id="hover-preview" hidden>
+      <img id="hover-preview-img" alt="">
+      <div id="hover-preview-title"></div>
+    </div>
+  </div>
+
+  <div id="empty" hidden>
+    <p>Browse anywhere — pages appear here as you go, and this panel always shows where you are in the web of what you've seen.</p>
+  </div>
+
+  <footer id="here" hidden>
+    <div id="here-title"></div>
+    <div id="here-from" class="muted"></div>
+  </footer>
+
+  <div id="actions">
+    <button id="park-btn">Park other tabs</button>
+    <p class="hint">Closes every captured tab except this one. Nothing is lost — the pages stay on the map, one click to reopen.</p>
+  </div>
+
+  <script src="../vendor/cytoscape.min.js"></script>
+  <script src="../vendor/layout-base.js"></script>
+  <script src="../vendor/cose-base.js"></script>
+  <script src="../vendor/cytoscape-fcose.js"></script>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>

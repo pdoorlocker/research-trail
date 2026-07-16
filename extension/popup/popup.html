@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="logo">Research Trail</span>
+    <span id="ollama-dot" class="dot" title="Checking Ollama…"></span>
+  </header>
+
+  <section>
+    <div class="journey-card">
+      <div class="journey-title" id="active-name"></div>
+      <div class="journey-meta" id="active-meta"></div>
+    </div>
+    <div class="row">
+      <button id="pause-btn"></button>
+      <button id="panel-btn">Side panel</button>
+    </div>
+    <button id="open-map-btn" class="primary">Open map</button>
+
+    <div id="ws-list"></div>
+
+    <div class="row">
+      <input id="ws-name" type="text" placeholder="New workspace…" maxlength="80">
+      <button id="ws-create">Add</button>
+    </div>
+  </section>
+
+  <footer id="ollama-hint" hidden></footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

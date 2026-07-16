@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+  <main>
+    <div id="clock"></div>
+
+    <section class="card">
+      <h1>Researching something?</h1>
+      <p class="sub">Give it a name and every page you touch gets mapped — connections, summaries, notes.</p>
+      <div class="row">
+        <input id="ws-name" type="text" placeholder="e.g. Vienna residence permits" maxlength="80" autofocus>
+        <button id="start-btn" class="primary">Start</button>
+      </div>
+      <div id="started" class="started" hidden></div>
+    </section>
+
+    <section id="status" class="status">
+      <div id="paused-note" class="paused-note" hidden>
+        Capture is paused — nothing is being recorded.
+        <button id="resume-btn">Resume</button>
+      </div>
+      <div class="current">
+        Capturing into <strong id="current-name">…</strong>
+        <span id="current-meta" class="muted"></span>
+      </div>
+      <div class="row actions">
+        <button id="panel-btn">Open side panel</button>
+        <a id="map-link" href="../journey/journey.html"><button>Open map</button></a>
+      </div>
+      <div id="ws-list"></div>
+    </section>
+  </main>
+
+  <script type="module" src="newtab.js"></script>
+</body>
+</html>

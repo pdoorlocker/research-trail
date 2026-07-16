@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Research Trail</title>
+  <link rel="stylesheet" href="journey.css">
+</head>
+<body>
+  <header id="topbar">
+    <span class="logo">Research Trail</span>
+    <select id="journey-select" title="Switch workspace"></select>
+    <span id="status-chip" class="chip"></span>
+    <span class="spacer"></span>
+    <span id="job-status" class="job-status" title="Ollama job queue"></span>
+    <button id="synthesize-btn" title="The AI reads every page and writes an overview: key threads, tensions, gaps">Summarize journey</button>
+    <button id="similarity-btn" title="The AI looks for pages on different sites that are about the same thing">Find connections</button>
+    <div class="menu-wrap">
+      <button id="export-btn">Export</button>
+      <div id="export-menu" class="menu" hidden>
+        <button data-export="md">Markdown report</button>
+        <button data-export="json">JSON</button>
+        <button data-export="canvas">Obsidian Canvas</button>
+      </div>
+    </div>
+    <button id="settings-btn">Settings</button>
+  </header>
+
+  <div id="ai-strip" hidden>
+    <span id="ai-strip-dot"></span>
+    <span id="ai-strip-text"></span>
+    <span class="spacer"></span>
+    <button id="ai-strip-toggle"></button>
+  </div>
+
+  <div id="suggest-strip" hidden>
+    <span id="suggest-dot"></span>
+    <span id="suggest-text"></span>
+    <span class="spacer"></span>
+    <button id="suggest-review">Review on map</button>
+  </div>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="graph">Graph</button>
+    <button class="tab" data-tab="timeline">Timeline</button>
+    <button id="topics-back" hidden>← All topics</button>
+    <span id="topic-name" class="chip" hidden></span>
+    <span id="connect-banner" hidden>Click another page to connect it — <button id="connect-cancel" class="ghost">cancel</button></span>
+  </nav>
+
+  <main>
+    <aside id="synthesis-panel" hidden>
+      <div class="panel-head" id="synthesis-toggle" title="Collapse / expand">
+        <strong>Summary</strong>
+        <span id="synthesis-date" class="muted"></span>
+        <span class="spacer"></span>
+        <span id="synthesis-chevron" class="muted">Hide</span>
+      </div>
+      <div id="synthesis-body" class="md"></div>
+    </aside>
+    <div id="graph-view">
+      <div id="cy"></div>
+      <div id="topics-view" hidden>
+        <div class="topics-head">
+          <h2>Scratch, organized</h2>
+          <p class="muted">Ambient browsing gets grouped into themes automatically. Open one to see its map, or promote it to a real workspace.</p>
+        </div>
+        <div id="topics-list"></div>
+      </div>
+      <div id="preview-banner" hidden>
+        <div>
+          <strong id="preview-name"></strong>
+          <div id="preview-meta" class="muted"></div>
+        </div>
+        <span class="spacer"></span>
+        <button id="preview-split" class="primary">Split into its own workspace</button>
+        <button id="preview-keep">Keep here</button>
+      </div>
+      <div id="graph-legend">
+        <span class="legend-toggle" data-type="navigated" title="Click to hide/show these connections"><i class="line solid"></i> clicked link</span>
+        <span class="legend-toggle" data-type="branched" title="Click to hide/show these connections"><i class="line solid branched"></i> opened in new tab</span>
+        <span class="legend-toggle" data-type="similar" title="Click to hide/show these connections"><i class="line dashed"></i> AI: similar content</span>
+        <span class="legend-toggle" data-type="manual" title="Click to hide/show these connections"><i class="line manual"></i> your connection</span>
+        <span class="legend-hint">Click a page for its summary &amp; your notes</span>
+      </div>
+      <div id="graph-controls">
+        <button id="zoom-in" title="Zoom in">+</button>
+        <button id="zoom-out" title="Zoom out">−</button>
+        <button id="zoom-fit" title="Fit everything on screen">Fit</button>
+        <button id="relayout" title="Re-arrange the whole map from scratch">Rearrange</button>
+        <button id="physics-toggle" title="When physics is off, pages stay exactly where you (or Rearrange) put them"></button>
+      </div>
+      <div id="empty-state" hidden>
+        <h2>No pages yet</h2>
+        <p>Start a journey from the toolbar popup, then browse. Pages and their connections will appear here live.</p>
+      </div>
+    </div>
+    <div id="timeline-view" hidden></div>
+
+    <aside id="drawer" hidden>
+      <div class="drawer-head">
+        <img id="d-favicon" width="18" height="18" alt="">
+        <a id="d-title" target="_blank" rel="noreferrer"></a>
+        <button id="drawer-close" class="ghost">Close</button>
+      </div>
+      <div id="d-hook" hidden></div>
+      <div id="d-meta" class="muted"></div>
+      <img id="d-thumb" alt="" hidden>
+      <div id="d-tags"></div>
+
+      <h3>Summary <button id="d-resummarize" class="ghost" title="Re-run the AI summary for this page">Redo</button></h3>
+      <ul id="d-summary"></ul>
+
+      <h3>Your notes</h3>
+      <textarea id="d-notes" placeholder="Why does this page matter? What did you take from it?"></textarea>
+
+      <h3>Highlights</h3>
+      <div id="d-highlights" class="muted small">Select text on the page → right-click → “Save highlight to Research Trail”.</div>
+
+      <h3>Connections</h3>
+      <ul id="d-connections"></ul>
+
+      <div class="drawer-actions">
+        <button id="d-goto" title="Switch to this page's tab, or reopen it">Go to tab</button>
+        <button id="d-connect">Connect to…</button>
+        <button id="d-delete" class="danger">Delete page</button>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="settings-modal">
+    <h2>Settings</h2>
+    <label>Ollama URL
+      <input id="s-url" type="text" spellcheck="false">
+    </label>
+    <div class="row">
+      <label>Chat model
+        <input id="s-chat" type="text" list="model-list" spellcheck="false" placeholder="auto-picks an installed model">
+      </label>
+      <label>Embedding model
+        <input id="s-embed" type="text" list="model-list" spellcheck="false" placeholder="auto (falls back to chat model)">
+      </label>
+    </div>
+    <datalist id="model-list"></datalist>
+    <div id="s-ollama-status" class="muted small"></div>
+    <label>Similarity threshold: <span id="s-threshold-val"></span>
+      <input id="s-threshold" type="range" min="0.5" max="0.95" step="0.01">
+    </label>
+    <label><input id="s-capture-text" type="checkbox"> Store page text locally (needed for summaries &amp; similarity)</label>
+    <label><input id="s-ai-paused" type="checkbox"> Pause AI processing — jobs queue up but nothing runs until you unpause (use when your machine needs the headroom)</label>
+    <label><input id="s-tab-groups" type="checkbox"> Mirror the workspace as a browser tab group (captured tabs join it; dragging a tab in adds the page to the map)</label>
+    <label>Return to Scratch after <input id="s-auto-return" type="number" min="0" max="720" style="width:64px"> minutes of quiet — browsing from a fresh start (typed URL, search, new tab) after this gap lands in Scratch instead of the last workspace. 0 turns it off.</label>
+    <label>Never capture these domains (one per line)
+      <textarea id="s-blocklist" rows="5" spellcheck="false"></textarea>
+    </label>
+    <div class="row">
+      <button id="s-retry-jobs">Retry failed AI jobs</button>
+      <button id="s-delete-journey" class="danger">Delete this journey</button>
+    </div>
+    <div class="row right">
+      <button id="s-cancel">Cancel</button>
+      <button id="s-save" class="primary">Save</button>
+    </div>
+  </dialog>
+
+  <dialog id="edge-modal">
+    <h2 id="e-type"></h2>
+    <p id="e-explain" class="muted small"></p>
+    <div class="edge-pages">
+      <button class="edge-page" id="e-page-a"></button>
+      <div id="e-label" class="edge-label" hidden></div>
+      <button class="edge-page" id="e-page-b"></button>
+    </div>
+    <div id="e-desc" class="edge-desc" hidden></div>
+    <div class="row right">
+      <button id="e-describe" hidden>Explain this connection</button>
+      <button id="e-edit-label" hidden>Edit label</button>
+      <button id="e-delete" class="danger" hidden>Remove connection</button>
+      <button id="e-close">Close</button>
+    </div>
+  </dialog>
+
+  <div id="toast" hidden></div>
+
+  <script src="../vendor/cytoscape.min.js"></script>
+  <script src="../vendor/layout-base.js"></script>
+  <script src="../vendor/cose-base.js"></script>
+  <script src="../vendor/cytoscape-fcose.js"></script>
+  <script type="module" src="journey.js"></script>
+</body>
+</html>

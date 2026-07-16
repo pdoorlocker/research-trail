@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Research Trail",
+  "version": "0.1.0",
+  "description": "Map your research journeys: track how pages connect, add commentary, and get local AI summaries via Ollama.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webNavigation",
+    "scripting",
+    "contextMenus",
+    "alarms",
+    "favicon",
+    "sidePanel",
+    "tabGroups",
+    "idle"
+  ],
+  "side_panel": {
+    "default_path": "panel/panel.html"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab/newtab.html"
+  },
+  "commands": {
+    "open-panel": {
+      "suggested_key": {
+        "default": "Alt+R"
+      },
+      "description": "Open the Research Trail side panel"
+    }
+  },
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Research Trail"
+  }
+}
