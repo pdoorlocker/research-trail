@@ -51,23 +51,43 @@ export async function resolveModels() {
 export async function generate(prompt, { system = '', timeoutMs = 120000, numPredict } = {}) {
   const { ollamaUrl } = await getSettings();
   const { chat } = await resolveModels();
-  const body = { model: chat, prompt, system, stream: false };
+  // think:false — our jobs are simple extraction/summarization tasks, and on
+  // thinking-capable models the deliberation otherwise eats the entire
+  // num_predict budget, returning an EMPTY response with done_reason
+  // "length" (thinking tokens are separated from `response` by Ollama).
+  const body = { model: chat, prompt, system, stream: false, think: false };
   // Ollama's default output cap is small (often ~128 tokens) — batch jobs
   // that return one entry per page need much more room or the response
   // truncates mid-JSON with no visible error.
   if (numPredict) body.options = { num_predict: numPredict };
-  const res = await fetch(`${ollamaUrl}/api/generate`, {
+
+  const attempt = () => fetch(`${ollamaUrl}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
+
+  let res = await attempt();
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Ollama generate failed (${res.status}): ${truncate(body, 200)}`);
+    const errText = await res.text().catch(() => '');
+    // Older Ollama builds / some models reject the think flag outright —
+    // drop it and retry once rather than failing the job.
+    if ('think' in body && /think/i.test(errText)) {
+      delete body.think;
+      res = await attempt();
+    }
+    if (!res.ok) {
+      const finalErr = (await res.text().catch(() => '')) || errText;
+      throw new Error(`Ollama generate failed (${res.status}): ${truncate(finalErr, 200)}`);
+    }
   }
   const data = await res.json();
-  return (data.response || '').trim();
+  const out = (data.response || '').trim();
+  if (!out && data.done_reason === 'length') {
+    throw new Error('model spent the whole output budget thinking and returned no answer');
+  }
+  return out;
 }
 
 export async function embed(text) {

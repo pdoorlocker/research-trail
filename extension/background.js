@@ -1299,7 +1299,7 @@ async function runJob(job) {
       const { system, prompt } = ollama.hooksPrompt(journeyNodes);
       // ~40 tokens/entry is generous; without this Ollama's default output
       // cap truncates the JSON well before 60 entries and silently yields 0.
-      const response = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: journeyNodes.length * 40 + 200 });
+      const response = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: journeyNodes.length * 60 + 500 });
       for (const { n, handle } of ollama.parseHooks(response, journeyNodes.length)) {
         await db.update('nodes', journeyNodes[n - 1].id, (x) => {
           x.hook = truncate(String(handle).trim(), 70);
@@ -1412,7 +1412,7 @@ async function runJob(job) {
         }));
         const { system, prompt } = ollama.clusterNamesPrompt(clusters);
         const response = await ollama.generate(prompt, {
-          system, timeoutMs: 180000, numPredict: toName.length * 30 + 150,
+          system, timeoutMs: 180000, numPredict: toName.length * 50 + 500,
         });
         const parsed = ollama.parseClusterNames(response, toName.length);
         // A response with zero usable names is a failure, not a success —
@@ -1499,7 +1499,7 @@ async function runJob(job) {
       const { system, prompt } = ollama.clusterNamesPrompt([
         { n: 1, pages: group.slice(0, 10).map((m) => m.hook || m.title || m.host) },
       ]);
-      const response = await ollama.generate(prompt, { system, numPredict: 120 });
+      const response = await ollama.generate(prompt, { system, numPredict: 400 });
       const name = ollama.parseClusterNames(response, 1)[0]?.name?.trim() || 'A separate thread';
       suggestions.push({
         id: uid(),
@@ -1560,7 +1560,7 @@ async function runJob(job) {
         .slice(-60); // batch prompt caps out; favor the most recent pages
       if (journeyNodes.length < 2) return;
       const { system, prompt } = ollama.connectionsBatchPrompt(journeyNodes);
-      const response = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: 1200 });
+      const response = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: 2000 });
       const pairs = ollama.parseConnections(response, journeyNodes.length);
       const existing = await db.getByIndex('edges', 'byJourney', job.journeyId);
       const connected = new Set(existing.map((e) => [e.from, e.to].sort().join('|')));
@@ -1582,7 +1582,7 @@ async function runJob(job) {
         .sort((a, b) => a.createdAt - b.createdAt);
       if (!nodes.length) return;
       const { system, prompt } = ollama.synthesisPrompt(journey, nodes);
-      const text = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: 1600 });
+      const text = await ollama.generate(prompt, { system, timeoutMs: 300000, numPredict: 2400 });
       await db.update('journeys', journey.id, (j) => {
         j.synthesis = { text, updatedAt: Date.now() };
         return j;
