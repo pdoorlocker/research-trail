@@ -1353,10 +1353,18 @@ async function runJob(job) {
         degree.set(e.to, (degree.get(e.to) || 0) + 1);
       }
       const visitDaySpan = (n) => new Set(n.visits.map((v) => new Date(v.at).toDateString())).size;
+      // No real captured text (title-only) is the same "nothing to say about
+      // this page" state that already denies it a hook and a summary — an
+      // account dashboard's URL scheme varies by site and a keyword list will
+      // always miss one, but "Readability found no body copy" generalizes:
+      // such pages are app shells / interstitials, never a topic in their
+      // own right, and their (title-only or absent) embedding is too generic
+      // to trust for similarity either.
+      const thin = (n) => !n.text && (!n.excerpt || n.excerpt.trim().length < 25);
       const isConnector = (n) =>
         CONNECTOR_RE.test(n.url)
         || /^(just a moment|sign in|log ?in)/i.test(n.title || '')
-        || (!n.text && !n.excerpt && !n.embedding)
+        || thin(n)
         || (degree.get(n.id) || 0) >= 6
         || (n.visits.length >= 4 && visitDaySpan(n) >= 2);
       for (const e of edges) {
