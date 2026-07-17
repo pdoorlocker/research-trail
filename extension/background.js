@@ -1334,11 +1334,25 @@ async function runJob(job) {
         const rb = find(b);
         if (ra !== rb) parent[ra] = rb;
       };
+      // Utility/hub pages — carts, checkouts, sign-ins, search results,
+      // captchas, account pages — sit in the middle of click-chains and
+      // BRIDGE unrelated threads: buying a bag and buying straws both pass
+      // through the same Amazon basket, and edge transitivity would weld
+      // them (and the bank login used to pay) into one mega-topic. Such
+      // pages never bind components; they get labeled from a neighbor after
+      // the real clusters form.
+      const CONNECTOR_RE = /(checkout|\/cart|basket|add-to-cart|sign[-_]?in|log[-_]?in|login|signin|auth|payment|captcha|verified\.|\/search\?|[?&]q=|thankyou|\/buy\/)/i;
+      const isConnector = (n) =>
+        CONNECTOR_RE.test(n.url)
+        || /^(just a moment|sign in|log ?in)/i.test(n.title || '')
+        || (!n.text && !n.excerpt && !n.embedding);
       for (const e of edges) {
         if (e.type === 'similar') continue; // raw cosine below is the better signal
         const a = idx.get(e.from);
         const b = idx.get(e.to);
-        if (a != null && b != null) union(a, b);
+        if (a == null || b == null) continue;
+        if (isConnector(nodes[a]) || isConnector(nodes[b])) continue;
+        union(a, b);
       }
       const firstVisit = (n) => n.visits[0]?.at ?? n.createdAt;
       for (let i = 0; i < nodes.length; i++) {
@@ -1346,6 +1360,7 @@ async function runJob(job) {
           const a = nodes[i];
           const b = nodes[j];
           if (!a.embedding || !b.embedding) continue;
+          if (isConnector(a) || isConnector(b)) continue; // cart/checkout embeddings are noise
           const sim = cosine(a.embedding, b.embedding);
           if (sim >= 0.55) union(i, j);
           // Time proximity chains transitively (page A ~ B ~ C … links a
@@ -1355,8 +1370,12 @@ async function runJob(job) {
         }
       }
 
+      // Components form over REAL pages only; connectors are labeled
+      // afterwards (pure labeling, no union — so a basket page touching two
+      // threads can never weld them together).
       const comps = new Map();
       nodes.forEach((n, i) => {
+        if (isConnector(n)) return;
         const root = find(i);
         if (!comps.has(root)) comps.set(root, []);
         comps.get(root).push(n);
@@ -1368,6 +1387,22 @@ async function runJob(job) {
       const liveTopicIds = new Set();
       let changed = false;
       for (const members of comps.values()) {
+        // A lone page isn't a theme — it stays in "Not yet organized"
+        // rather than minting single-page topic confetti (and a naming
+        // call). If related pages show up later, it clusters then.
+        if (members.length < 2) {
+          for (const m of members) {
+            if (m.topicId) {
+              await db.update('nodes', m.id, (x) => {
+                delete x.topicId;
+                return x;
+              });
+              delete m.topicId;
+              changed = true;
+            }
+          }
+          continue;
+        }
         // Keep whichever existing topic most of this cluster already carries.
         const votes = new Map();
         for (const m of members) {
@@ -1394,6 +1429,7 @@ async function runJob(job) {
               x.topicId = topicId;
               return x;
             });
+            m.topicId = topicId;
             changed = true;
           }
         }
@@ -1401,14 +1437,46 @@ async function runJob(job) {
           toName.push({ topic: topicById.get(topicId), members });
         }
       }
+      // Connectors (carts, sign-ins, search pages) display alongside a real
+      // neighbor when one exists — a pure label, never a bridge.
+      for (const n of nodes) {
+        if (!isConnector(n)) continue;
+        let label = null;
+        for (const e of edges) {
+          if (e.type === 'similar') continue;
+          const otherId = e.from === n.id ? e.to : e.to === n.id ? e.from : null;
+          if (!otherId) continue;
+          const other = nodes[idx.get(otherId)];
+          if (other && !isConnector(other) && other.topicId) {
+            label = other.topicId;
+            break;
+          }
+        }
+        if ((n.topicId || null) !== label) {
+          await db.update('nodes', n.id, (x) => {
+            if (label) x.topicId = label;
+            else delete x.topicId;
+            return x;
+          });
+          n.topicId = label || undefined;
+          changed = true;
+        }
+      }
+
       for (const t of topics) {
         if (!liveTopicIds.has(t.id)) await db.remove('topics', t.id);
       }
 
       if (toName.length) {
+        // Sample the pages that actually describe the theme — hostname-only
+        // entries tell the namer nothing.
         const clusters = toName.map((e, i) => ({
           n: i + 1,
-          pages: e.members.slice(0, 10).map((m) => m.hook || m.title || m.host),
+          pages: e.members
+            .filter((m) => m.hook || m.title)
+            .concat(e.members.filter((m) => !m.hook && !m.title))
+            .slice(0, 10)
+            .map((m) => m.hook || m.title || m.host),
         }));
         const { system, prompt } = ollama.clusterNamesPrompt(clusters);
         const response = await ollama.generate(prompt, {

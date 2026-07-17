@@ -37,6 +37,7 @@ async function init() {
   wireDrawer();
   wireSettings();
   wirePreview();
+  wireSearch();
   $('topics-back').onclick = () => {
     selectedTopicId = null;
     graphSignature = '';
@@ -210,6 +211,156 @@ async function loadData(id) {
   if (openEdgeId && $('edge-modal').open && !populateEdgeModal(openEdgeId)) {
     $('edge-modal').close(); // edge got deleted under us
   }
+}
+
+// ---------- Search ----------
+// One box, every workspace: matches hooks, titles, summaries, notes, tags,
+// hosts and URLs. Picking a result jumps there — switching workspace (and
+// Scratch topic) if needed — then selects, centers, and opens the drawer.
+
+let searchIndex = null;
+let searchIndexAt = 0;
+let searchTimer = null;
+
+async function buildSearchIndex() {
+  if (searchIndex && Date.now() - searchIndexAt < 30000) return searchIndex;
+  const [allN, allJ] = await Promise.all([db.getAll('nodes'), db.getAll('journeys')]);
+  const wsName = new Map(allJ.map((j) => [j.id, j.name]));
+  searchIndex = allN.map((n) => ({
+    id: n.id,
+    journeyId: n.journeyId,
+    topicId: n.topicId || null,
+    title: n.title || '',
+    hook: n.hook || '',
+    host: n.host,
+    url: n.url,
+    notes: n.notes || '',
+    tags: (n.tags || []).join(' '),
+    summary: (n.summary || []).join(' '),
+    ws: wsName.get(n.journeyId) || '',
+  }));
+  searchIndexAt = Date.now();
+  return searchIndex;
+}
+
+function searchScore(entry, terms) {
+  let score = 0;
+  const fields = [
+    [entry.hook, 4], [entry.title, 3], [entry.tags, 2], [entry.notes, 2],
+    [entry.summary, 1], [entry.host, 1], [entry.url, 0.5],
+  ];
+  for (const term of terms) {
+    let termScore = 0;
+    for (const [text, weight] of fields) {
+      if (text && text.toLowerCase().includes(term)) termScore = Math.max(termScore, weight);
+    }
+    if (!termScore) return 0; // every term must match somewhere
+    score += termScore;
+  }
+  return score;
+}
+
+async function runSearch(q) {
+  const box = $('search-results');
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) {
+    box.hidden = true;
+    return;
+  }
+  const index = await buildSearchIndex();
+  const hits = index
+    .map((e) => ({ e, score: searchScore(e, terms) }))
+    .filter((h) => h.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12);
+
+  box.textContent = '';
+  if (!hits.length) {
+    const empty = document.createElement('div');
+    empty.className = 'search-empty';
+    empty.textContent = 'No pages match.';
+    box.appendChild(empty);
+  }
+  hits.forEach(({ e }, i) => {
+    const item = document.createElement('div');
+    item.className = 'search-item' + (i === 0 ? ' hot' : '');
+    const img = document.createElement('img');
+    img.src = faviconUrl(e.url, 16);
+    img.alt = '';
+    const main = document.createElement('div');
+    main.className = 's-main';
+    const title = document.createElement('div');
+    title.className = 's-title';
+    title.textContent = e.hook || e.title || e.host;
+    const sub = document.createElement('div');
+    sub.className = 's-sub';
+    sub.textContent = e.hook && e.title ? `${e.title} · ${e.host}` : e.host;
+    main.append(title, sub);
+    const ws = document.createElement('span');
+    ws.className = 's-ws';
+    ws.textContent = e.ws;
+    item.append(img, main, ws);
+    item.onclick = () => openSearchResult(e);
+    box.appendChild(item);
+  });
+  box.hidden = false;
+}
+
+async function openSearchResult(entry) {
+  $('search-results').hidden = true;
+  $('search').value = '';
+  searchIndex = null; // next search re-reads fresh data
+  if (entry.journeyId !== journey?.id) {
+    await switchJourney(entry.journeyId);
+  }
+  if (isScratchJourney(journey)) {
+    const target = entry.topicId || '__unsorted';
+    if (selectedTopicId !== target) {
+      selectedTopicId = target;
+      graphSignature = '';
+      cy?.elements().remove();
+      await loadData(journey.id);
+    }
+  }
+  selectedNodeId = entry.id;
+  renderDrawer();
+  if (cy) {
+    cy.elements(':selected').unselect();
+    const el = cy.getElementById(entry.id);
+    if (el.length) {
+      el.select();
+      cy.animate({ center: { eles: el }, duration: 250, easing: 'ease-out' });
+    }
+  }
+}
+
+function wireSearch() {
+  const input = $('search');
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runSearch(input.value.trim()), 200);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = $('search-results').querySelector('.search-item');
+      first?.click();
+    } else if (e.key === 'Escape') {
+      $('search-results').hidden = true;
+      input.blur();
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#search-wrap')) $('search-results').hidden = true;
+  });
+  // "/" from anywhere focuses search, like every good tool.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/') return;
+    const t = document.activeElement;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if ($('settings-modal').open || $('edge-modal').open) return;
+    e.preventDefault();
+    input.focus();
+  });
 }
 
 // ---------- Scratch topics view ----------
@@ -1548,12 +1699,33 @@ function renderTimeline() {
   svg.id = 'tl-svg';
   container.appendChild(svg);
 
+  // Provenance is resolved in chronological order ("from" points at the
+  // most recent earlier visit of the source page)…
+  const items = visits.map((v) => ({ v, fromIdx: null, adjacent: false, branched: false }));
+  const lastIdxByNode = new Map();
+  items.forEach((item, i) => {
+    const v = item.v;
+    item.branched = !!(v.from && edgeType.get(`${v.from}|${v.node.id}`) === 'branched');
+    if (v.from != null && lastIdxByNode.has(v.from)) {
+      item.fromIdx = lastIdxByNode.get(v.from);
+      item.adjacent = item.fromIdx === i - 1;
+    }
+    lastIdxByNode.set(v.node.id, i);
+  });
+  // …then rendered newest-first: reading down the page goes back in time.
+  items.reverse();
+  const oldToNew = [];
+  items.forEach((item, i) => { oldToNew[items.length - 1 - i] = i; });
+  for (const item of items) {
+    if (item.fromIdx != null) item.fromIdx = oldToNew[item.fromIdx];
+  }
+
   // Each entry gets a site-colored dot on a left rail; real relationships
   // (clicked from / branched from) are drawn as connectors between dots.
   const entryMeta = [];
-  const lastIdxByNode = new Map();
   let lastDay = '';
-  visits.forEach((v, i) => {
+  items.forEach((item) => {
+    const v = item.v;
     const day = new Date(v.at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
     if (day !== lastDay) {
       const h = document.createElement('div');
@@ -1585,23 +1757,17 @@ function renderTimeline() {
     title.textContent = v.node.title || v.node.url;
     main.appendChild(title);
 
-    const branched = v.from && edgeType.get(`${v.from}|${v.node.id}`) === 'branched';
     if (v.from && byId.has(v.from)) {
       const from = document.createElement('div');
       from.className = 'tl-from';
-      from.innerHTML = branched ? '<span class="branch">new tab from</span> ' : 'from ';
+      from.innerHTML = item.branched ? '<span class="branch">new tab from</span> ' : 'from ';
       from.appendChild(document.createTextNode(truncate(byId.get(v.from).title || byId.get(v.from).host, 60)));
       main.appendChild(from);
     }
     entry.append(dot, time, icon, main);
     container.appendChild(entry);
 
-    entryMeta.push({
-      el: entry,
-      fromIdx: v.from != null && lastIdxByNode.has(v.from) ? lastIdxByNode.get(v.from) : null,
-      branched,
-    });
-    lastIdxByNode.set(v.node.id, i);
+    entryMeta.push({ el: entry, fromIdx: item.fromIdx, adjacent: item.adjacent, branched: item.branched });
   });
 
   drawTimelineConnectors(container, svg, entryMeta);
@@ -1627,12 +1793,15 @@ function drawTimelineConnectors(container, svg, entryMeta) {
     const a = pts[m.fromIdx];
     const b = pts[i];
     const color = m.branched ? '#0969da' : muted;
-    if (m.fromIdx === i - 1) {
-      // Came straight from the previous entry: a plain segment on the rail.
-      parts.push(`<line x1="${a.x}" y1="${a.y + 9}" x2="${b.x}" y2="${b.y - 9}" stroke="${color}" stroke-width="2" opacity="0.6"/>`);
+    // Direction-agnostic: with newest-first ordering, the source sits BELOW
+    // its destination, so offsets/bulges derive from the actual geometry.
+    const dir = b.y > a.y ? 1 : -1;
+    if (m.adjacent) {
+      // Came straight from the neighboring entry: a plain segment on the rail.
+      parts.push(`<line x1="${a.x}" y1="${a.y + 9 * dir}" x2="${b.x}" y2="${b.y - 9 * dir}" stroke="${color}" stroke-width="2" opacity="0.6"/>`);
     } else {
-      // Jumped back to an earlier page: arc out to the left, dot at the landing.
-      const bulge = Math.min(36, 14 + (b.y - a.y) / 14);
+      // A jump across the list: arc out to the left, dot at the landing.
+      const bulge = Math.min(36, 14 + Math.abs(b.y - a.y) / 14);
       parts.push(
         `<path d="M ${a.x - 7} ${a.y} C ${a.x - bulge} ${a.y}, ${b.x - bulge} ${b.y}, ${b.x - 7} ${b.y}" fill="none" stroke="${color}" stroke-width="2" opacity="0.6"/>`,
         `<circle cx="${b.x - 7}" cy="${b.y}" r="2.5" fill="${color}"/>`,
