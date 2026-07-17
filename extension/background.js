@@ -1341,11 +1341,24 @@ async function runJob(job) {
       // them (and the bank login used to pay) into one mega-topic. Such
       // pages never bind components; they get labeled from a neighbor after
       // the real clusters form.
-      const CONNECTOR_RE = /(checkout|\/cart|basket|add-to-cart|sign[-_]?in|log[-_]?in|login|signin|auth|payment|captcha|verified\.|\/search\?|[?&]q=|thankyou|\/buy\/)/i;
+      const CONNECTOR_RE = /(checkout|\/cart|basket|add-to-cart|sign[-_]?in|log[-_]?in|login|signin|auth|payment|captcha|verified\.|\/search\?|[?&]q=|thankyou|\/buy\/|orders?[/.-]|order-|\/track|tracking|\/help|customer|contact|returns?\b|support|account)/i;
+      // Behavioral hub signals, beyond URL patterns: a page clicked to/from
+      // many others, or revisited across separate days, is a waypoint
+      // ("Your Orders", a site's homepage) — not a topic. Such pages are
+      // what welded yesterday's shopping to today's package-tracking.
+      const degree = new Map();
+      for (const e of edges) {
+        if (e.type === 'similar') continue;
+        degree.set(e.from, (degree.get(e.from) || 0) + 1);
+        degree.set(e.to, (degree.get(e.to) || 0) + 1);
+      }
+      const visitDaySpan = (n) => new Set(n.visits.map((v) => new Date(v.at).toDateString())).size;
       const isConnector = (n) =>
         CONNECTOR_RE.test(n.url)
         || /^(just a moment|sign in|log ?in)/i.test(n.title || '')
-        || (!n.text && !n.excerpt && !n.embedding);
+        || (!n.text && !n.excerpt && !n.embedding)
+        || (degree.get(n.id) || 0) >= 6
+        || (n.visits.length >= 4 && visitDaySpan(n) >= 2);
       for (const e of edges) {
         if (e.type === 'similar') continue; // raw cosine below is the better signal
         const a = idx.get(e.from);
