@@ -166,9 +166,12 @@ async function loadData(id) {
     hooksRequested.add(id);
     send({ type: 'refresh-hooks', journeyId: id });
   }
-  // Scratch with unorganized pages: kick the organizer once per session.
+  // Scratch with unorganized pages OR topics stuck without names (e.g. the
+  // naming call failed while Ollama was unreachable): kick the organizer
+  // once per session.
   if (scratch && !topicsRequested.has(id)
-      && allNodes.filter((n) => !n.topicId).length >= 3) {
+      && (allNodes.filter((n) => !n.topicId).length >= 3
+        || topics.some((t) => !t.name))) {
     topicsRequested.add(id);
     send({ type: 'refresh-topics', journeyId: id });
   }

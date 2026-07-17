@@ -1348,7 +1348,10 @@ async function runJob(job) {
           if (!a.embedding || !b.embedding) continue;
           const sim = cosine(a.embedding, b.embedding);
           if (sim >= 0.55) union(i, j);
-          else if (sim >= 0.4 && Math.abs(firstVisit(a) - firstVisit(b)) < 15 * 60 * 1000) union(i, j);
+          // Time proximity chains transitively (page A ~ B ~ C … links a
+          // whole evening into one mega-cluster), so it needs a stiff
+          // similarity bar, not a loose one.
+          else if (sim >= 0.5 && Math.abs(firstVisit(a) - firstVisit(b)) < 10 * 60 * 1000) union(i, j);
         }
       }
 
@@ -1375,6 +1378,7 @@ async function runJob(job) {
         let topicId = null;
         let best = 0;
         for (const [tid, c] of votes) {
+          if (liveTopicIds.has(tid)) continue; // a topic belongs to ONE component — when a cluster splits, the runner-up mints a new topic
           if (c > best) { best = c; topicId = tid; }
         }
         if (!topicId) {
@@ -1410,7 +1414,13 @@ async function runJob(job) {
         const response = await ollama.generate(prompt, {
           system, timeoutMs: 180000, numPredict: toName.length * 30 + 150,
         });
-        for (const { n, name } of ollama.parseClusterNames(response, toName.length)) {
+        const parsed = ollama.parseClusterNames(response, toName.length);
+        // A response with zero usable names is a failure, not a success —
+        // throwing lets the queue retry instead of leaving topics stuck at
+        // "Organizing…" forever. (Cluster assignments are already saved and
+        // survive the retry.)
+        if (!parsed.length) throw new Error('topic naming returned no parsable names');
+        for (const { n, name } of parsed) {
           await db.update('topics', toName[n - 1].topic.id, (x) => {
             x.name = truncate(String(name).trim(), 60);
             x.updatedAt = Date.now();
