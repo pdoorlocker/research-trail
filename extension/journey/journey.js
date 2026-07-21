@@ -11,6 +11,21 @@ const send = (msg) => chrome.runtime.sendMessage(msg);
 let journey = null;
 let nodes = [];
 let edges = [];
+
+// Temporary domain scope, mirroring the side panel's lens: while non-empty,
+// the graph and timeline show only these domains' pages. Ephemeral by
+// design — cleared on workspace switch, never persisted.
+const domainScope = new Set();
+
+// Same key node ring colors hash on (host sans www), so the chip strip's
+// colors match the rings exactly.
+function domainKeyOf(n) {
+  return n.host.replace(/^www\./, '');
+}
+
+function visibleNodes() {
+  return domainScope.size ? nodes.filter((n) => domainScope.has(domainKeyOf(n))) : nodes;
+}
 let cy = null;
 let selectedNodeId = null;
 let connectFromId = null;
@@ -112,6 +127,7 @@ async function switchJourney(id) {
   selectedNodeId = null;
   connectFromId = null;
   selectedTopicId = null;
+  domainScope.clear();
   previewActive = false;
   activeSuggestion = null;
   $('preview-banner').hidden = true;
@@ -200,8 +216,13 @@ async function loadData(id) {
   }
 
   renderSynthesis();
-  if (showTopics) renderTopicsView();
-  else renderGraph();
+  if (showTopics) {
+    $('domain-strip').hidden = true;
+    renderTopicsView();
+  } else {
+    renderDomainStrip();
+    renderGraph();
+  }
   // The timeline measures DOM positions, so it only renders while visible;
   // switching to the tab re-renders it (and skipping it here saves a full
   // DOM rebuild on every background update).
@@ -920,6 +941,9 @@ function cssVar(name) {
 function buildElements() {
   const elements = [];
   const cleanHost = (h) => h.replace(/^www\./, '');
+  // The domain lens filters here, at the source — group boxes, edges, and
+  // counts all follow from the scoped node set with no special cases.
+  const scoped = visibleNodes();
 
   // Two-level clustering: pages group by hostname; hostname boxes nest inside
   // a registrable-domain box only when several distinct hosts share it
@@ -927,7 +951,7 @@ function buildElements() {
   // blog.foo.com nest under foo.com).
   const hostCount = new Map();
   const domainHosts = new Map();
-  for (const n of nodes) {
+  for (const n of scoped) {
     const h = cleanHost(n.host);
     const d = baseDomain(n.host);
     hostCount.set(h, (hostCount.get(h) || 0) + 1);
@@ -955,7 +979,7 @@ function buildElements() {
     }
   }
 
-  for (const n of nodes) {
+  for (const n of scoped) {
     const h = cleanHost(n.host);
     const d = baseDomain(n.host);
     const parent = hostCount.get(h) >= 2
@@ -974,10 +998,11 @@ function buildElements() {
         favicon: faviconUrl(n.url, 32),
         size,
         state,
+        domainKey: h,
       },
     });
   }
-  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeIds = new Set(scoped.map((n) => n.id));
   for (const e of edges) {
     if (!nodeIds.has(e.from) || !nodeIds.has(e.to)) continue;
     elements.push({
@@ -1117,6 +1142,86 @@ function graphStyle() {
 }
 
 // ---------- Connection-type filter ----------
+
+// ---------- Domain strip ----------
+// One chip per domain in the current view, in the domain's ring color — the
+// legend that filters, same interaction as the side panel: click to scope,
+// click more to widen, "All" (or emptying the selection) clears. Hovering a
+// chip previews its pages through the regular spotlight.
+
+function renderDomainStrip() {
+  const strip = $('domain-strip');
+  const counts = new Map();
+  for (const n of nodes) {
+    const key = domainKeyOf(n);
+    const entry = counts.get(key);
+    if (entry) entry.count += 1;
+    else counts.set(key, { count: 1, url: n.url });
+  }
+  for (const key of [...domainScope]) {
+    if (!counts.has(key)) domainScope.delete(key);
+  }
+  if (counts.size < 2) {
+    domainScope.clear();
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  strip.textContent = '';
+
+  const apply = () => {
+    renderDomainStrip();
+    renderGraph();
+    // The set of visible pages just changed shape — bring it into view.
+    if (cy?.elements().length) cy.animate({ fit: { padding: 50 } }, { duration: 250 });
+  };
+
+  if (domainScope.size) {
+    const all = document.createElement('button');
+    all.className = 'domain-chip domain-chip-all';
+    all.textContent = 'All';
+    all.title = 'Clear the domain filter';
+    all.onclick = () => {
+      domainScope.clear();
+      apply();
+    };
+    strip.appendChild(all);
+  }
+
+  const sorted = [...counts.entries()].sort((a, b) => b[1].count - a[1].count);
+  for (const [key, info] of sorted) {
+    const chip = document.createElement('button');
+    const scoped = domainScope.has(key);
+    chip.className = 'domain-chip' + (scoped ? ' scoped' : '') +
+      (domainScope.size && !scoped ? ' excluded' : '');
+    chip.style.setProperty('--chip-color', domainColor(key));
+    chip.title = scoped
+      ? `Showing ${key} — click to remove it from the filter`
+      : `Show only ${key}${domainScope.size ? ' (and the other selected domains)' : ''}`;
+    const icon = document.createElement('img');
+    icon.src = faviconUrl(info.url, 16);
+    icon.alt = '';
+    const name = document.createElement('span');
+    name.className = 'domain-chip-name';
+    name.textContent = key;
+    const count = document.createElement('span');
+    count.className = 'domain-chip-count';
+    count.textContent = info.count;
+    chip.append(icon, name, count);
+    chip.onclick = () => {
+      if (domainScope.has(key)) domainScope.delete(key);
+      else domainScope.add(key);
+      apply();
+    };
+    chip.onmouseenter = () => {
+      if (!cy || previewActive) return;
+      const mine = cy.nodes(`[domainKey = "${key}"]`);
+      if (mine.length) spotlight(mine.union(mine.ancestors()));
+    };
+    chip.onmouseleave = clearSpotlight;
+    strip.appendChild(chip);
+  }
+}
 
 let hiddenEdgeTypes = new Set(JSON.parse(localStorage.getItem('rt-hidden-edges') || '[]'));
 
@@ -1678,7 +1783,8 @@ function renderTimeline() {
   const container = $('timeline-view');
   container.textContent = '';
   const visits = [];
-  for (const n of nodes) {
+  // The domain lens applies here too — one filter, both views agree.
+  for (const n of visibleNodes()) {
     for (const v of n.visits) visits.push({ at: v.at, from: v.from, node: n });
   }
   visits.sort((a, b) => a.at - b.at);

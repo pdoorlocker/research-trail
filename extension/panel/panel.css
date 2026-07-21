@@ -78,6 +78,46 @@ button.icon { padding: 5px 8px; }
 #suggest-note-text { flex: 1; min-width: 0; }
 #suggest-note button { font-size: 12px; padding: 4px 9px; flex-shrink: 0; }
 
+/* Domain strip: legend + filter in one. Chip colors match node rings. */
+#domain-strip {
+  display: flex;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+}
+.domain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chip-color, var(--border));
+  border-radius: 999px;
+  background: var(--card);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+.domain-chip img { width: 12px; height: 12px; }
+.domain-chip-count { color: var(--muted); font-size: 10px; }
+.domain-chip.scoped {
+  background: color-mix(in srgb, var(--chip-color) 18%, var(--card));
+  border-color: var(--chip-color);
+  font-weight: 600;
+}
+.domain-chip.excluded { opacity: 0.45; }
+.domain-chip.excluded:hover { opacity: 0.8; }
+.domain-chip-all {
+  border-left-width: 1px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 #graph-wrap { flex: 1; min-height: 0; position: relative; }
 #cy { position: absolute; inset: 0; }
 

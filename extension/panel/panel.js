@@ -18,6 +18,19 @@ let tabMap = { byNode: {}, activeNodeId: null };
 let cy = null;
 let graphSignature = '';
 
+// Temporary domain scope: while non-empty, the graph shows only these
+// domains' pages. Deliberately ephemeral — it's a lens, not a setting: lives
+// in panel memory only and clears when you switch workspaces or reopen.
+const domainScope = new Set();
+
+// Same key that node ring colors hash on, so the chip strip doubles as a
+// color legend that actually matches the rings. Subdomains stay distinct on
+// purpose: termine.sozialversicherung.at and www.sozialversicherung.at are
+// different tools on a bureaucratic trail.
+function domainKeyOf(n) {
+  return n.host.replace(/^www\./, '');
+}
+
 const PALETTE = [
   '#2f81f7', '#3fb950', '#d29922', '#a371f7', '#f778ba',
   '#56d4dd', '#e3684c', '#6e7681', '#7ee787', '#79c0ff',
@@ -79,14 +92,18 @@ async function reload() {
   const switched = state.activeJourneyId !== journeyId;
   journeyId = state.activeJourneyId;
   if (!journeyId) return;
-  if (switched && cy) {
-    cy.elements().remove();
-    graphSignature = '';
+  if (switched) {
+    domainScope.clear(); // a lens on one workspace makes no sense on another
+    if (cy) {
+      cy.elements().remove();
+      graphSignature = '';
+    }
   }
   nodes = await db.getByIndex('nodes', 'byJourney', journeyId);
   edges = await db.getByIndex('edges', 'byJourney', journeyId);
   tabMap = await send({ type: 'tab-map' });
   renderHeader(state);
+  renderDomainStrip();
   renderGraph();
   renderHere();
   renderSuggestNote();
@@ -142,9 +159,12 @@ async function renderHeader(state) {
 // stomps on whatever fillPanelSpace() last computed.
 function buildElements() {
   const elements = [];
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  for (const n of nodes) {
-    const host = n.host.replace(/^www\./, '');
+  const visible = domainScope.size
+    ? nodes.filter((n) => domainScope.has(domainKeyOf(n)))
+    : nodes;
+  const nodeIds = new Set(visible.map((n) => n.id));
+  for (const n of visible) {
+    const host = domainKeyOf(n);
     const open = !!tabMap.byNode[n.id]?.length;
     const active = tabMap.activeNodeId === n.id;
     elements.push({
@@ -157,6 +177,7 @@ function buildElements() {
         color: domainColor(host),
         favicon: faviconUrl(n.url, 32),
         state: active ? 'active' : open ? 'open' : 'parked',
+        domainKey: host,
         // Kept only for the hover preview — the node's shape stays the same
         // favicon-in-a-ring circle everywhere, matching the full map.
         thumb: n.thumb || undefined,
@@ -177,6 +198,91 @@ function buildElements() {
     });
   }
   return elements;
+}
+
+// ---------- Domain strip ----------
+// One chip per domain, in the domain's ring color — a legend that filters.
+// Click a chip to scope the map to that domain; click more to widen the
+// lens; "All" (or clicking the last active chip) clears it. Hovering a chip
+// previews its selection by dimming everything else, so you see what you'd
+// get before committing.
+
+function renderDomainStrip() {
+  const strip = $('domain-strip');
+  const counts = new Map();
+  for (const n of nodes) {
+    const key = domainKeyOf(n);
+    const entry = counts.get(key);
+    if (entry) entry.count += 1;
+    else counts.set(key, { count: 1, url: n.url });
+  }
+  // Deleted pages can orphan a scoped domain — drop it rather than showing
+  // an empty map with no visible reason.
+  for (const key of [...domainScope]) {
+    if (!counts.has(key)) domainScope.delete(key);
+  }
+  if (counts.size < 2) {
+    domainScope.clear();
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  strip.textContent = '';
+
+  if (domainScope.size) {
+    const all = document.createElement('button');
+    all.className = 'domain-chip domain-chip-all';
+    all.textContent = 'All';
+    all.title = 'Clear the domain filter';
+    all.onclick = () => {
+      domainScope.clear();
+      renderDomainStrip();
+      renderGraph();
+    };
+    strip.appendChild(all);
+  }
+
+  const sorted = [...counts.entries()].sort((a, b) => b[1].count - a[1].count);
+  for (const [key, info] of sorted) {
+    const chip = document.createElement('button');
+    const scoped = domainScope.has(key);
+    chip.className = 'domain-chip' + (scoped ? ' scoped' : '') +
+      (domainScope.size && !scoped ? ' excluded' : '');
+    chip.style.setProperty('--chip-color', domainColor(key));
+    chip.title = scoped
+      ? `Showing ${key} — click to remove it from the filter`
+      : `Show only ${key}${domainScope.size ? ' (and the other selected domains)' : ''}`;
+    const icon = document.createElement('img');
+    icon.src = faviconUrl(info.url, 16);
+    icon.alt = '';
+    const name = document.createElement('span');
+    name.className = 'domain-chip-name';
+    name.textContent = key;
+    const count = document.createElement('span');
+    count.className = 'domain-chip-count';
+    count.textContent = info.count;
+    chip.append(icon, name, count);
+    chip.onclick = () => {
+      if (domainScope.has(key)) domainScope.delete(key);
+      else domainScope.add(key);
+      renderDomainStrip();
+      renderGraph();
+    };
+    // Preview on hover: spotlight this domain's pages without committing.
+    chip.onmouseenter = () => {
+      if (!cy) return;
+      cy.batch(() => {
+        cy.nodes().forEach((el) => {
+          el.toggleClass('dimmed', el.data('domainKey') !== key);
+        });
+        cy.edges().addClass('dimmed');
+      });
+    };
+    chip.onmouseleave = () => {
+      if (cy) cy.batch(() => cy.elements().removeClass('dimmed'));
+    };
+    strip.appendChild(chip);
+  }
 }
 
 function graphStyle() {

@@ -340,6 +340,51 @@ main { flex: 1; display: flex; position: relative; overflow: hidden; }
 #graph-view { flex: 1; position: relative; }
 #cy { position: absolute; inset: 0; }
 
+/* Domain strip: the legend that filters. Sits above the edge legend,
+   clear of the zoom controls on the right. */
+#domain-strip {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  max-width: calc(100% - 200px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.domain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chip-color, var(--border));
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--fg);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.domain-chip img { width: 12px; height: 12px; }
+.domain-chip-count { color: var(--muted); font-size: 10px; }
+.domain-chip.scoped {
+  background: color-mix(in srgb, var(--chip-color) 18%, var(--card));
+  border-color: var(--chip-color);
+  font-weight: 600;
+}
+.domain-chip.excluded { opacity: 0.45; }
+.domain-chip.excluded:hover { opacity: 0.8; }
+.domain-chip-all {
+  border-left-width: 1px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 #graph-legend {
   position: absolute;
   left: 12px;
