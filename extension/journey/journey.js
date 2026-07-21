@@ -1172,8 +1172,16 @@ function renderDomainStrip() {
   const apply = () => {
     renderDomainStrip();
     renderGraph();
-    // The set of visible pages just changed shape — bring it into view.
-    if (cy?.elements().length) cy.animate({ fit: { padding: 50 } }, { duration: 250 });
+    // Bring the reshaped view into frame — and keep it there: the diff path
+    // wakes the physics simulation, which goes on nudging pages for a second
+    // or so after a single fit would have snapshotted, drifting them
+    // off-viewport. Refit a few times across the settle window (late passes
+    // are no-ops once everything is calm).
+    for (const delay of [60, 450, 1000, 1800]) {
+      setTimeout(() => {
+        if (cy?.elements().length) cy.fit(undefined, 50);
+      }, delay);
+    }
   };
 
   if (domainScope.size) {

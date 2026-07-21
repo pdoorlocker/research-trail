@@ -1,10 +1,20 @@
 # 🧭 Research Trail
 
+> **What this is:** a personal tool, built to scratch my own itch (in my case: untangling Austrian residence-permit paperwork across dozens of government pages). It's shared here as working code, not a polished product — there's no store listing, no telemetry, no roadmap. It runs entirely on your machine.
+
 A Chrome extension that replaces tab anxiety with a map. As you browse, it builds a live graph of every page and how they connect — clicked links, new-tab branches, same-site clusters, and (via a local Ollama model) semantic similarity. The **side panel** always shows where you are in that web: your current page ringed, open tabs lit, closed pages dimmed but never lost — click any node to jump to its tab or resurrect it. Closing a tab is *parking*, not losing: the page stays on the map with its summary, your notes, and its connections.
 
 You're always in a **workspace** (like a tab group that remembers everything); switch or create them from the toolbar popup. Add notes and highlights as you go, then export any workspace as a Markdown report.
 
-Everything stays on your machine: page text lives in the browser's IndexedDB, and all AI runs against your local Ollama instance.
+Everything stays on your machine: page text lives in the browser's IndexedDB, and all AI runs against your local Ollama instance (with one opt-in exception, noted under Privacy).
+
+## Screenshots
+
+| Side panel — "you are here" | Full map — clusters, drawer, timeline |
+|---|---|
+| ![Side panel](docs/panel.png) | ![Journey map](docs/map.png) |
+
+![Amtshelfer translating an Austrian government page](docs/amtshelfer.png)
 
 ## Install
 
@@ -44,6 +54,17 @@ If Ollama is offline, AI jobs queue up and run automatically when it comes back.
    - **🔗 Find connections** runs the embedding similarity pass across everything captured so far.
    - The **Timeline** tab shows the same trail chronologically, with branch points marked.
 6. **Export** as a Markdown report, JSON, or an Obsidian Canvas file (preserves the graph layout).
+7. The extension also replaces the **new tab page** with a minimal "scope this tangent" prompt — every research detour starts with a new tab, so that's where it asks (once, gently) which workspace you're in.
+
+## Amtshelfer (the itch that got scratched)
+
+The reason this tool exists: reading Austrian government sites in bureaucratic German. **Amtshelfer** ("office helper") is a module that activates only on German-language pages and adds a hover toolbar to each text block:
+
+- **Translate** — swaps German↔English in place, preserving the page's markup, using Chrome's on-device Translator API (or Ollama). Translations are cached per paragraph by text hash, so they survive revisits.
+- **Explain** — plain-language explanation of what a clause actually means for you, using Ollama (or, opt-in, Gemini — see Privacy). Because it lives inside Research Trail, "explain this" knows your current workspace's goal and the pages you've already read on this trail.
+- **Glossary & ask-the-page** — collect recurring bureaucratic terms, or chat with the current page from the side panel.
+
+It's wired into the trail rather than standalone on purpose: the workspace name *is* the goal, and the journey *is* the context.
 
 ## Privacy guardrails
 
@@ -51,7 +72,8 @@ If Ollama is offline, AI jobs queue up and run automatically when it comes back.
 - Incognito tabs are never captured.
 - A domain blocklist (editable in settings) excludes mail, messaging, and login pages by default.
 - Page text storage can be turned off entirely in settings (you lose summaries/similarity).
-- No network requests except to your own Ollama instance. Favicons are served by Chrome's local favicon cache.
+- The Amtshelfer content script is injected into all pages (that's how the hover toolbar can exist), but it detects the page language locally and goes inert on non-German pages; it stores paragraph state in IndexedDB, keyed by a hash of the text.
+- **Network:** by default, the only requests are to your own local Ollama instance; favicons come from Chrome's local favicon cache. The one exception is opt-in: if you set an API key and switch Amtshelfer's Explain backend to Gemini, the selected paragraph (plus your workspace goal and page summaries, if page context is enabled) is sent to Google's API. Leave the backend on Ollama and nothing ever leaves your machine.
 - Delete any page, connection, or whole journey from the UI.
 
 ## Architecture
@@ -61,15 +83,19 @@ extension/
   manifest.json          MV3 manifest
   background.js          service worker: navigation tracking, graph building,
                          time accounting, Ollama job queue
-  capture.js             injected per-page (only while recording): Readability
-                         text extraction
+  capture.js             injected on capture: Readability text extraction
   lib/
     db.js                IndexedDB wrapper (journeys / nodes / edges / jobs)
     ollama.js            Ollama client + prompt builders
     util.js              URL canonicalization, domain grouping, settings
-  popup/                 start/pause/finish controls
+  popup/                 workspace switcher, pause, quick actions
+  panel/                 side panel: live "you are here" mini-map
+  newtab/                new tab override: scope-your-tangent prompt
   journey/               the map: Cytoscape graph, timeline, drawer, settings
-  vendor/                cytoscape.min.js, Readability.js (vendored, no build step)
+  amtshelfer/            DE→EN translate/explain module (content script +
+                         background half, streaming over a dedicated port)
+  vendor/                cytoscape (+ fcose layout), Readability.js
+                         (vendored, no build step; licenses in file headers)
 ```
 
 There is no build step — edit a file, hit reload on `chrome://extensions`, done.
@@ -85,3 +111,7 @@ There is no build step — edit a file, hit reload on `chrome://extensions`, don
 | manual | you, via *Connect to…* in the node drawer |
 
 URLs are canonicalized before deduping: hash fragments and tracking params (`utm_*`, `fbclid`, `gclid`, …) are stripped, so revisits merge into one node with a visit history.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Vendored libraries keep their own licenses (Readability.js: Apache-2.0; Cytoscape.js and the fCoSE layout: MIT).
