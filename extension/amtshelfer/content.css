@@ -1,0 +1,497 @@
+/* Amtshelfer page styles — everything namespaced ah- and defensive against
+   host-page CSS. The hover toolbar lives in shadow DOM and is styled there. */
+
+/* Translated marker: colored left border, subtle tint while showing English */
+[data-ah-hash].ah-translated {
+  border-left: 3px solid #2f855a !important;
+  padding-left: 8px !important;
+}
+[data-ah-hash].ah-showing-en {
+  background: rgba(47, 133, 90, 0.06) !important;
+}
+
+/* Read marker — independent of translation state */
+[data-ah-hash].ah-read {
+  opacity: 0.62 !important;
+}
+[data-ah-hash].ah-read.ah-translated {
+  border-left-style: double !important;
+}
+
+[data-ah-hash].ah-busy {
+  opacity: 0.5 !important;
+  transition: opacity 0.2s;
+}
+
+/* Gentle "this is what you're about to act on" highlight while hovering */
+[data-ah-hash].ah-hover {
+  outline: 2px solid rgba(128, 90, 213, 0.45) !important;
+  outline-offset: 2px !important;
+  border-radius: 3px !important;
+  background: rgba(128, 90, 213, 0.05) !important;
+  transition: outline-color 0.12s ease, background 0.12s ease !important;
+}
+
+/* A saved explanation exists for this block — subtle purple dot in the margin */
+[data-ah-hash].ah-explained {
+  position: relative !important;
+}
+[data-ah-hash].ah-explained::before {
+  content: "" !important;
+  position: absolute !important;
+  left: -11px !important;
+  top: 0.55em !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: #805ad5 !important;
+}
+
+/* DE/EN toggle chip appended inside translated blocks */
+.ah-chip {
+  all: initial !important;
+  display: inline-block !important;
+  cursor: pointer !important;
+  margin-left: 6px !important;
+  padding: 1px 6px !important;
+  border: 1px solid #2f855a !important;
+  border-radius: 9px !important;
+  font: 700 10px/1.5 -apple-system, system-ui, sans-serif !important;
+  color: #2f855a !important;
+  background: #fff !important;
+  vertical-align: middle !important;
+  user-select: none !important;
+}
+.ah-chip:hover {
+  background: #2f855a !important;
+  color: #fff !important;
+}
+
+/* Inline explanation panel */
+.ah-explain {
+  all: initial !important;
+  display: block !important;
+  margin: 6px 0 12px !important;
+  border: 1px solid #cbd2d9 !important;
+  border-left: 3px solid #805ad5 !important;
+  border-radius: 6px !important;
+  background: #faf9ff !important;
+  font: 14px/1.5 -apple-system, system-ui, sans-serif !important;
+  color: #1f2933 !important;
+}
+.ah-explain-head {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 6px 10px !important;
+  border-bottom: 1px solid #e4e7eb !important;
+}
+.ah-explain-title {
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  color: #805ad5 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+}
+.ah-explain-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+.ah-explain-redo {
+  all: initial !important;
+  cursor: pointer !important;
+  font: 600 11px/1 -apple-system, system-ui, sans-serif !important;
+  color: #805ad5 !important;
+  border: 1px solid #d6bcfa !important;
+  border-radius: 5px !important;
+  padding: 3px 7px !important;
+}
+.ah-explain-redo:hover { background: #805ad5 !important; color: #fff !important; }
+.ah-explain-close {
+  all: initial !important;
+  cursor: pointer !important;
+  font: 700 16px/1 -apple-system, system-ui, sans-serif !important;
+  color: #7b8794 !important;
+  padding: 0 4px !important;
+}
+.ah-explain-close:hover { color: #1f2933 !important; }
+.ah-explain-body {
+  padding: 10px 12px !important;
+  white-space: pre-wrap !important;
+}
+
+/* Live "waiting on the model" state — used for the explain body and a
+   pending chat answer bubble, both of which can sit for many seconds. */
+.ah-explain-body.ah-explain-loading,
+.ah-chat-a.ah-explain-loading {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #7b8794 !important;
+  font-style: italic !important;
+}
+.ah-explain-body.ah-explain-loading::before,
+.ah-chat-a.ah-explain-loading::before {
+  content: "" !important;
+  flex: 0 0 auto !important;
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid rgba(128, 90, 213, 0.25) !important;
+  border-top-color: #805ad5 !important;
+  border-radius: 50% !important;
+  animation: ah-spin 0.7s linear infinite !important;
+}
+
+/* Follow-up chat inside the explain panel */
+.ah-chat-q {
+  margin: 8px 12px 2px !important;
+  padding: 6px 10px !important;
+  background: #e9e4f5 !important;
+  border-radius: 8px 8px 8px 2px !important;
+  font-weight: 600 !important;
+  white-space: pre-wrap !important;
+}
+.ah-chat-a {
+  margin: 4px 12px !important;
+  padding: 6px 10px !important;
+  background: #fff !important;
+  border: 1px solid #e4e7eb !important;
+  border-radius: 8px !important;
+  white-space: pre-wrap !important;
+}
+.ah-chat-row {
+  display: flex !important;
+  gap: 6px !important;
+  padding: 8px 12px 10px !important;
+}
+.ah-chat-input {
+  all: initial !important;
+  flex: 1 !important;
+  padding: 6px 9px !important;
+  border: 1px solid #cbd2d9 !important;
+  border-radius: 6px !important;
+  font: 13px/1.4 -apple-system, system-ui, sans-serif !important;
+  color: #1f2933 !important;
+  background: #fff !important;
+}
+.ah-chat-send {
+  all: initial !important;
+  cursor: pointer !important;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  background: #805ad5 !important;
+  color: #fff !important;
+  font: 600 12px/1.4 -apple-system, system-ui, sans-serif !important;
+}
+.ah-chat-send:hover { background: #6b46c1 !important; }
+.ah-chat-send:disabled { opacity: 0.5 !important; cursor: wait !important; }
+
+/* Per-paragraph AI gist line */
+.ah-gist {
+  all: initial !important;
+  display: block !important;
+  margin: 2px 0 10px !important;
+  padding: 3px 8px 3px 10px !important;
+  border-left: 3px solid #b794f4 !important;
+  color: #553c9a !important;
+  background: rgba(128, 90, 213, 0.06) !important;
+  font: italic 13px/1.4 -apple-system, system-ui, sans-serif !important;
+}
+
+/* Glossary term underline */
+.ah-term {
+  border-bottom: 2px dotted #805ad5 !important;
+  cursor: help !important;
+}
+
+/* English-version banner */
+#ah-banner {
+  all: initial !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 2147483645 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 8px 14px !important;
+  background: #1f2933 !important;
+  font: 13px/1.4 -apple-system, system-ui, sans-serif !important;
+}
+#ah-banner a {
+  color: #7ce0a3 !important;
+  text-decoration: underline !important;
+}
+#ah-banner button {
+  all: initial !important;
+  cursor: pointer !important;
+  color: #9aa5b1 !important;
+  font: 700 15px/1 -apple-system, system-ui, sans-serif !important;
+  padding: 0 4px !important;
+}
+#ah-banner button:hover { color: #fff !important; }
+
+/* "Ask the page" agent: highlighted supporting passages + answer panel */
+[data-ah-hash].ah-agent-hit {
+  position: relative !important;
+  outline: 3px solid rgba(217, 119, 6, 0.75) !important;
+  outline-offset: 2px !important;
+  border-radius: 3px !important;
+  background: rgba(251, 191, 36, 0.14) !important;
+  scroll-margin: 120px !important;
+}
+/* Number badge matching the [N] citations in the answer panel */
+[data-ah-hash].ah-agent-hit::after {
+  content: attr(data-ah-agent-n) !important;
+  position: absolute !important;
+  top: -10px !important;
+  left: -10px !important;
+  min-width: 17px !important;
+  height: 17px !important;
+  padding: 0 4px !important;
+  box-sizing: border-box !important;
+  border-radius: 9px !important;
+  background: #d97706 !important;
+  color: #fff !important;
+  font: 700 10.5px/17px -apple-system, system-ui, sans-serif !important;
+  text-align: center !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+  z-index: 1 !important;
+}
+.ah-agent-ref {
+  all: initial !important;
+  cursor: pointer !important;
+  font: 700 12px/1.2 -apple-system, system-ui, sans-serif !important;
+  color: #b45309 !important;
+  padding: 0 2px !important;
+  border-radius: 3px !important;
+}
+.ah-agent-ref:hover {
+  background: #d97706 !important;
+  color: #fff !important;
+}
+
+#ah-agent-panel {
+  all: initial !important;
+  position: fixed !important;
+  bottom: 18px !important;
+  left: 18px !important;
+  z-index: 2147483646 !important;
+  width: 340px !important;
+  max-height: 50vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 1px solid #cbd2d9 !important;
+  border-left: 3px solid #d97706 !important;
+  border-radius: 8px !important;
+  background: #fffdf7 !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25) !important;
+  font: 14px/1.5 -apple-system, system-ui, sans-serif !important;
+  color: #1f2933 !important;
+}
+.ah-agent-head {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 6px 10px !important;
+  border-bottom: 1px solid #e4e7eb !important;
+}
+.ah-agent-title {
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  color: #b45309 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+}
+.ah-agent-close {
+  all: initial !important;
+  cursor: pointer !important;
+  font: 700 16px/1 -apple-system, system-ui, sans-serif !important;
+  color: #7b8794 !important;
+  padding: 0 4px !important;
+}
+.ah-agent-close:hover { color: #1f2933 !important; }
+.ah-agent-q {
+  padding: 8px 10px 0 !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  color: #52606d !important;
+}
+.ah-agent-scroll {
+  overflow-y: auto !important;
+  min-height: 0 !important;
+}
+.ah-agent-body {
+  padding: 8px 10px 10px !important;
+  white-space: pre-wrap !important;
+}
+.ah-agent-foot {
+  padding: 6px 10px !important;
+  border-top: 1px solid #e4e7eb !important;
+  font-size: 11.5px !important;
+  color: #92702a !important;
+}
+/* Follow-up bubbles inside the agent panel reuse the explain-chat styles;
+   the input row just needs the amber accent instead of purple. */
+#ah-agent-panel .ah-chat-q {
+  background: #fdf0d5 !important;
+}
+#ah-agent-panel .ah-chat-send {
+  background: #d97706 !important;
+}
+#ah-agent-panel .ah-chat-send:hover {
+  background: #b45309 !important;
+}
+
+/* "Translate section" preview: inspector-style box shown while the pointer
+   rests on the toolbar button, outlining exactly what a click would grab */
+#ah-section-box {
+  all: initial !important;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+  background: rgba(47, 133, 90, 0.12) !important;
+  outline: 2px solid #2f855a !important;
+  outline-offset: 1px !important;
+  border-radius: 3px !important;
+}
+#ah-section-label {
+  all: initial !important;
+  position: absolute !important;
+  top: -24px !important;
+  left: 0 !important;
+  padding: 3px 8px !important;
+  border-radius: 5px !important;
+  background: #2f855a !important;
+  color: #fff !important;
+  font: 700 11px/1.3 -apple-system, system-ui, sans-serif !important;
+  white-space: nowrap !important;
+}
+
+/* Select-options cheat sheet: read-only DE→EN mapping beside a dropdown */
+#ah-select-panel {
+  all: initial !important;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  width: 330px !important;
+  max-height: 45vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 1px solid #cbd2d9 !important;
+  border-left: 3px solid #2f855a !important;
+  border-radius: 8px !important;
+  background: #f7fdf9 !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25) !important;
+  font: 13px/1.45 -apple-system, system-ui, sans-serif !important;
+  color: #1f2933 !important;
+}
+.ah-select-head {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 6px 10px !important;
+  border-bottom: 1px solid #e4e7eb !important;
+}
+.ah-select-title {
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  color: #2f855a !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+}
+.ah-select-close {
+  all: initial !important;
+  cursor: pointer !important;
+  font: 700 16px/1 -apple-system, system-ui, sans-serif !important;
+  color: #7b8794 !important;
+  padding: 0 4px !important;
+}
+.ah-select-close:hover { color: #1f2933 !important; }
+.ah-select-body {
+  overflow-y: auto !important;
+  min-height: 0 !important;
+  padding: 4px 0 !important;
+}
+.ah-select-row {
+  display: flex !important;
+  gap: 10px !important;
+  padding: 4px 10px !important;
+  border-bottom: 1px solid #eef2f0 !important;
+}
+.ah-select-row:last-child { border-bottom: none !important; }
+.ah-select-de {
+  flex: 1 !important;
+  color: #52606d !important;
+}
+.ah-select-en {
+  flex: 1 !important;
+  font-weight: 600 !important;
+}
+.ah-select-current {
+  background: rgba(47, 133, 90, 0.10) !important;
+  border-left: 3px solid #2f855a !important;
+  padding-left: 7px !important;
+}
+.ah-select-foot {
+  padding: 5px 10px !important;
+  border-top: 1px solid #e4e7eb !important;
+  font-size: 11px !important;
+  color: #7b8794 !important;
+}
+
+/* Toast */
+#ah-toast {
+  all: initial !important;
+  position: fixed !important;
+  bottom: 18px !important;
+  right: 18px !important;
+  z-index: 2147483647 !important;
+  max-width: 340px !important;
+  padding: 10px 14px !important;
+  border-radius: 8px !important;
+  background: #1f2933 !important;
+  color: #e4e7eb !important;
+  font: 13px/1.4 -apple-system, system-ui, sans-serif !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+  opacity: 0 !important;
+  transform: translateY(6px) !important;
+  transition: opacity 0.2s, transform 0.2s !important;
+  pointer-events: none !important;
+  white-space: pre-wrap !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+}
+#ah-toast.ah-toast-show {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}
+#ah-toast.ah-toast-error {
+  background: #7f1d1d !important;
+  color: #fecaca !important;
+}
+.ah-toast-text {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+/* Spinner shown only while a toast is in its sticky ("still working") state */
+.ah-toast-spinner {
+  display: none !important;
+  flex: 0 0 auto !important;
+  width: 12px !important;
+  height: 12px !important;
+  margin-top: 2px !important;
+  border: 2px solid rgba(255, 255, 255, 0.25) !important;
+  border-top-color: #fff !important;
+  border-radius: 50% !important;
+  animation: ah-spin 0.7s linear infinite !important;
+}
+#ah-toast.ah-toast-busy .ah-toast-spinner {
+  display: block !important;
+}
+@keyframes ah-spin {
+  to { transform: rotate(360deg); }
+}

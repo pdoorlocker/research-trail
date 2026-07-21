@@ -5,6 +5,7 @@
   "description": "Map your research journeys: track how pages connect, add commentary, and get local AI summaries via Ollama.",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "tabs",
     "webNavigation",
     "scripting",
@@ -14,6 +15,15 @@
     "sidePanel",
     "tabGroups",
     "idle"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "all_frames": true,
+      "js": ["amtshelfer/content.js"],
+      "css": ["amtshelfer/content.css"],
+      "run_at": "document_idle"
+    }
   ],
   "side_panel": {
     "default_path": "panel/panel.html"

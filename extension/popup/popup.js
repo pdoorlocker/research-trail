@@ -110,3 +110,47 @@ async function checkOllama() {
 
 render();
 checkOllama();
+
+// ---------- Amtshelfer quick actions ----------
+// Talks straight to the Amtshelfer content script in the active tab (top
+// frame). Full controls (glossary, ask-the-page, settings) live in the
+// side panel's Amtshelfer card.
+const AH_TOP = { frameId: 0 };
+
+async function ahSend(msg) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return null;
+  try {
+    return await chrome.tabs.sendMessage(tab.id, msg, AH_TOP);
+  } catch {
+    return null;
+  }
+}
+
+async function renderAmtshelfer() {
+  const status = await ahSend({ type: 'status' });
+  const toggle = $('ah-toggle-btn');
+  const translate = $('ah-translate-btn');
+  if (!status) {
+    translate.disabled = true;
+    translate.title = "Amtshelfer can't run on this page";
+    return;
+  }
+  translate.disabled = !status.active;
+  toggle.hidden = false;
+  toggle.textContent = status.active ? 'Amtshelfer: on' : 'Amtshelfer: off';
+  toggle.title = status.active
+    ? 'Disable DE\u2192EN translation on this page'
+    : 'Enable DE\u2192EN translation on this page';
+  toggle.onclick = async () => {
+    await ahSend({ type: 'setOverride', value: status.active ? 'off' : 'on' });
+    renderAmtshelfer();
+  };
+}
+
+$('ah-translate-btn').onclick = async () => {
+  await ahSend({ type: 'pageTranslate' });
+  window.close();
+};
+
+renderAmtshelfer();

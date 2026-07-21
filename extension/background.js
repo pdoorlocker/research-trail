@@ -11,6 +11,10 @@ import {
   canonicalUrl, hostOf, baseDomain, isCapturable, uid, cosine, truncate, getSettings,
 } from './lib/util.js';
 import * as ollama from './lib/ollama.js';
+// Amtshelfer (DE→EN translation + Explain for Austrian gov sites) runs as a
+// self-contained module: it registers its own port listener and never touches
+// this file's message protocol.
+import './amtshelfer/background.js';
 
 const MAX_JOB_ATTEMPTS = 4;
 

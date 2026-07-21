@@ -5,6 +5,7 @@
 // get a stronger border, everything else is parked (one click to reopen).
 
 import * as db from '../lib/db.js';
+import { mountAmtshelferCard } from '../amtshelfer/card.js';
 import { baseDomain, faviconUrl, truncate, workspaceSort } from '../lib/util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -544,4 +545,19 @@ window.addEventListener('resize', () => {
   runLayout(true); // container size changed — re-fit into the new dimensions
 });
 
+// The graph shares the panel column with elements whose height changes
+// without any window resize — the Amtshelfer card's accordions, the footer
+// appearing, the suggestion note. Watch the graph container itself and
+// re-fit the node spread whenever its box actually changes.
+let graphResizeTimer = null;
+new ResizeObserver(() => {
+  if (!cy) return;
+  clearTimeout(graphResizeTimer);
+  graphResizeTimer = setTimeout(() => {
+    cy.resize();
+    runLayout(true);
+  }, 150);
+}).observe(document.getElementById('graph-wrap'));
+
 init();
+mountAmtshelferCard(document.getElementById('amtshelfer-card'));
