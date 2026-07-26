@@ -50,6 +50,13 @@ async function init() {
   $('map-btn').onclick = () => {
     chrome.tabs.create({ url: chrome.runtime.getURL(`journey/journey.html${journeyId ? '?j=' + journeyId : ''}`) });
   };
+  // The conversation needs room to breathe, so it lives on the map page —
+  // this just opens it straight onto the Ask tab.
+  $('ask-btn').onclick = () => {
+    const params = new URLSearchParams({ ask: '1' });
+    if (journeyId) params.set('j', journeyId);
+    chrome.tabs.create({ url: chrome.runtime.getURL(`journey/journey.html?${params}`) });
+  };
   $('park-btn').onclick = async () => {
     const res = await send({ type: 'park-others' });
     if (res.parked) flashParkButton(`Parked ${res.parked} tab${res.parked === 1 ? '' : 's'}`);

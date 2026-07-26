@@ -46,6 +46,7 @@
   <nav id="tabs">
     <button class="tab active" data-tab="graph">Graph</button>
     <button class="tab" data-tab="timeline">Timeline</button>
+    <button class="tab" data-tab="ask" title="Ask questions about everything you've collected in this workspace">Ask</button>
     <button id="topics-back" hidden>← All topics</button>
     <span id="topic-name" class="chip" hidden></span>
     <span id="connect-banner" hidden>Click another page to connect it — <button id="connect-cancel" class="ghost">cancel</button></span>
@@ -100,6 +101,23 @@
       </div>
     </div>
     <div id="timeline-view" hidden></div>
+
+    <div id="ask-view" hidden>
+      <div id="ask-head">
+        <div>
+          <strong>Ask this workspace</strong>
+          <div id="ask-context" class="muted small"></div>
+        </div>
+        <span class="spacer"></span>
+        <button id="ask-clear" class="ghost" title="Start a fresh conversation">Clear</button>
+      </div>
+      <div id="ask-thread"></div>
+      <form id="ask-form">
+        <textarea id="ask-input" rows="2" placeholder="Ask about everything on this trail…  (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button id="ask-send" class="primary" type="submit">Ask</button>
+        <button id="ask-stop" type="button" hidden>Stop</button>
+      </form>
+    </div>
 
     <aside id="drawer" hidden>
       <div class="drawer-head">

@@ -90,6 +90,84 @@ export async function generate(prompt, { system = '', timeoutMs = 120000, numPre
   return out;
 }
 
+export const CORS_HINT =
+  'Run once in Terminal:  launchctl setenv OLLAMA_ORIGINS "chrome-extension://*"  then quit and restart Ollama.';
+
+// Streaming chat, for the conversational surfaces (Ask this workspace). Unlike
+// generate(), the caller sees tokens as they arrive and can cut the answer
+// short by aborting the signal, which makes Ollama stop generating. An aborted
+// stream still returns the text produced so far — a half answer beats none.
+// (The Amtshelfer module keeps its own copy of this, wired to its streaming
+// port; this one is for pages that talk to Ollama directly.)
+export async function chatStream(messages, { temperature = 0.3, numCtx, onDelta, signal } = {}) {
+  const { ollamaUrl } = await getSettings();
+  const { chat } = await resolveModels();
+  const url = `${ollamaUrl.replace(/\/+$/, '')}/api/chat`;
+  const options = { temperature };
+  // Ollama's default context window is small on many setups, and it truncates
+  // silently from the front — which would quietly eat the material the answer
+  // is supposed to be grounded in. Callers that send a big prompt say so.
+  if (numCtx) options.num_ctx = numCtx;
+  const body = { model: chat, messages, stream: true, options };
+
+  const attempt = (payload) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  let res;
+  try {
+    res = await attempt({ ...body, think: false });
+    // Older Ollama builds / some models reject the think flag outright.
+    if (res.status === 400 && /think/i.test(await res.clone().text().catch(() => ''))) {
+      res = await attempt(body);
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return { ok: true, text: '', aborted: true };
+    return {
+      ok: false,
+      error: `Could not reach Ollama at ${ollamaUrl}.`,
+      hint: 'Is Ollama running? Start it (or fix the URL in settings), then try again.',
+    };
+  }
+  if (res.status === 403) {
+    return { ok: false, error: 'Ollama rejected the request (403 — CORS).', hint: CORS_HINT };
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return { ok: false, error: `Ollama error ${res.status}: ${truncate(text, 200)}` };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  for (;;) {
+    let chunk;
+    try { chunk = await reader.read(); } catch { break; /* aborted mid-stream */ }
+    if (chunk.done) break;
+    buf += decoder.decode(chunk.value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let piece;
+      try { piece = JSON.parse(line)?.message?.content || ''; } catch { piece = ''; }
+      if (piece) {
+        full += piece;
+        try { onDelta?.(piece, full); } catch { /* listener gone */ }
+      }
+    }
+  }
+  const out = full.trim();
+  if (signal?.aborted) return { ok: true, text: out, aborted: true, backend: `Ollama · ${chat}` };
+  if (!out) return { ok: false, error: 'Ollama returned an empty response.' };
+  return { ok: true, text: out, backend: `Ollama · ${chat}` };
+}
+
 export async function embed(text) {
   const { ollamaUrl } = await getSettings();
   const { embed: embedModel } = await resolveModels();

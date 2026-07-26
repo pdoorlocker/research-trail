@@ -4,6 +4,8 @@ import * as db from '../lib/db.js';
 import {
   baseDomain, formatDuration, faviconUrl, getSettings, saveSettings, truncate,
 } from '../lib/util.js';
+import { ASK_SYSTEM_PROMPT, buildIndexBlock, buildDetailBlock } from '../lib/ask.js';
+import { chatStream } from '../lib/ollama.js';
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -53,6 +55,7 @@ async function init() {
   wireSettings();
   wirePreview();
   wireSearch();
+  wireAsk();
   $('topics-back').onclick = () => {
     selectedTopicId = null;
     graphSignature = '';
@@ -85,7 +88,10 @@ async function init() {
     await switchJourney(current.id);
   } else {
     $('empty-state').hidden = false;
+    renderAsk();
   }
+  // Deep link from the side panel's Ask button: land straight in the conversation.
+  if (new URLSearchParams(location.search).get('ask')) activateTab('ask');
 
   // Arriving via a suggestion notification (?suggest=<id>): jump straight
   // into the split preview, switching workspaces first if needed.
@@ -135,6 +141,7 @@ async function switchJourney(id) {
   cy?.elements().remove();
   closeDrawer();
   await loadData(id);
+  loadAskThread(id); // each workspace keeps its own conversation
 }
 
 let reloadTimer = null;
@@ -228,6 +235,7 @@ async function loadData(id) {
   // DOM rebuild on every background update).
   if (!$('timeline-view').hidden) renderTimeline();
   $('empty-state').hidden = nodes.length > 0 || showTopics;
+  renderAskContext();
   if (selectedNodeId) renderDrawer();
   if (openEdgeId && $('edge-modal').open && !populateEdgeModal(openEdgeId)) {
     $('edge-modal').close(); // edge got deleted under us
@@ -588,14 +596,7 @@ function wireTopbar() {
   $('e-close').onclick = () => $('edge-modal').close();
 
   for (const tab of document.querySelectorAll('.tab')) {
-    tab.onclick = () => {
-      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      $('graph-view').style.display = tab.dataset.tab === 'graph' ? '' : 'none';
-      $('timeline-view').hidden = tab.dataset.tab !== 'timeline';
-      if (tab.dataset.tab === 'graph' && cy) cy.resize();
-      // Connector positions can only be measured while the timeline is visible.
-      if (tab.dataset.tab === 'timeline' && journey) renderTimeline();
-    };
+    tab.onclick = () => activateTab(tab.dataset.tab);
   }
 
   $('connect-cancel').onclick = cancelConnectMode;
@@ -678,6 +679,17 @@ function wireTopbar() {
     toast(`Removed ${res?.removed ?? pageIds.size} page${pageIds.size === 1 ? '' : 's'}.`);
     scheduleReload();
   });
+}
+
+function activateTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  $('graph-view').style.display = name === 'graph' ? '' : 'none';
+  $('timeline-view').hidden = name !== 'timeline';
+  $('ask-view').hidden = name !== 'ask';
+  if (name === 'graph' && cy) cy.resize();
+  // Connector positions can only be measured while the timeline is visible.
+  if (name === 'timeline' && journey) renderTimeline();
+  if (name === 'ask') $('ask-input').focus();
 }
 
 let physicsFrozen = localStorage.getItem('rt-physics-frozen') === '1';
@@ -1785,6 +1797,320 @@ function renderDrawer() {
   }
 }
 
+// ---------- Ask this workspace ----------
+//
+// A conversation grounded in everything the trail holds for this workspace:
+// every page, its summary and tags, the notes you typed, the passages you
+// highlighted, and how the pages reach each other. The model cites pages by
+// number; those citations render as buttons that open the page's drawer, so
+// "which link do I need for the paperwork?" ends one click from the page.
+//
+// Threads are per workspace and survive a reload (localStorage). The page list
+// is re-read on every send, so a thread picked up tomorrow sees today's pages.
+
+let askThread = []; // [{ q, a, refs: {n: {id,title,host,url}}, error, hint }]
+let askAbort = null;
+let askStreamEl = null;
+
+const askKey = (id) => `rt-ask-${id}`;
+
+function loadAskThread(journeyId) {
+  askAbort?.abort();
+  askAbort = null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(askKey(journeyId)) || '[]');
+    askThread = Array.isArray(raw) ? raw : [];
+  } catch {
+    askThread = [];
+  }
+  setAskBusy(false);
+  renderAsk();
+}
+
+function saveAskThread() {
+  if (!journey) return;
+  // Persist the transcript only — the page snapshot behind it is rebuilt on
+  // every send, and DOM references must never reach JSON.
+  const plain = askThread
+    .slice(-20)
+    .map((t) => ({ q: t.q, a: t.a, refs: t.refs, error: t.error, hint: t.hint }));
+  try {
+    localStorage.setItem(askKey(journey.id), JSON.stringify(plain));
+  } catch { /* quota — the transcript is a convenience, not data */ }
+}
+
+function wireAsk() {
+  const form = $('ask-form');
+  const input = $('ask-input');
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    askQuestion(q);
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  $('ask-stop').onclick = () => askAbort?.abort();
+  $('ask-clear').onclick = () => {
+    askAbort?.abort();
+    askThread = [];
+    saveAskThread();
+    renderAsk();
+  };
+}
+
+function setAskBusy(busy) {
+  $('ask-send').disabled = busy;
+  $('ask-send').textContent = busy ? 'Thinking…' : 'Ask';
+  $('ask-stop').hidden = !busy;
+}
+
+async function askQuestion(question) {
+  if (askAbort) return; // one answer at a time
+  if (!journey || !nodes.length) {
+    toast('Nothing captured in this workspace yet — browse a little first.');
+    return;
+  }
+  // Snapshot the page list: citation [n] means "position n in this array", and
+  // pages captured mid-answer must not shift the numbering underneath it.
+  const pages = nodes;
+  const turn = { q: question, a: '', refs: {}, _pages: pages, streaming: true };
+  askThread.push(turn);
+  renderAsk();
+
+  const abort = new AbortController();
+  askAbort = abort;
+  setAskBusy(true);
+
+  try {
+    const topicName = isScratchJourney(journey) && selectedTopicId
+      ? (topics.find((t) => t.id === selectedTopicId)?.name || '')
+      : '';
+    const index = buildIndexBlock(journey, pages, edges, { topicName });
+    const { text: detail } = await buildDetailBlock(pages, question);
+
+    // Failed turns are left out — a transcript full of "Ollama was offline"
+    // teaches the model nothing — and only the recent ones ride along, so a
+    // long conversation doesn't crowd out the trail itself.
+    const history = askThread.slice(0, -1).filter((t) => t.a && !t.error).slice(-6);
+    const messages = [{ role: 'system', content: ASK_SYSTEM_PROMPT }];
+    history.forEach((t, i) => {
+      // The whole trail rides on the first user turn only; later turns add the
+      // pages that matter for their own question.
+      messages.push({ role: 'user', content: (i === 0 ? `${index}\n\n` : '') + `Question: ${t.q}` });
+      messages.push({ role: 'assistant', content: t.a });
+    });
+    messages.push({
+      role: 'user',
+      content: (history.length ? '' : `${index}\n\n`)
+        + (detail ? `${detail}\n\n` : '') + `Question: ${question}`,
+    });
+
+    let frame = 0;
+    const res = await chatStream(messages, {
+      temperature: 0.2,
+      numCtx: 16384, // the trail + the question needs real room; see chatStream
+      signal: abort.signal,
+      onDelta: (_piece, full) => {
+        turn.a = full;
+        if (frame) return;
+        frame = requestAnimationFrame(() => { frame = 0; paintAskAnswer(turn); });
+      },
+    });
+    cancelAnimationFrame(frame);
+    if (res.ok) {
+      turn.a = res.text || turn.a;
+      if (res.aborted && turn.a) turn.a += '\n\n_(stopped)_';
+      if (!turn.a) turn.error = 'Stopped before the model said anything.';
+    } else {
+      turn.error = res.error;
+      turn.hint = res.hint;
+    }
+  } catch (e) {
+    turn.error = String(e?.message || e);
+  } finally {
+    turn.streaming = false;
+    turn.refs = citedRefs(turn);
+    askAbort = null;
+    setAskBusy(false);
+    saveAskThread();
+    renderAsk();
+  }
+}
+
+// Which pages an answer actually cited, resolved against the snapshot it was
+// written from, so restored transcripts keep working links.
+function citedRefs(turn) {
+  const refs = { ...(turn.refs || {}) };
+  for (const m of (turn.a || '').matchAll(/\[(\d+)\]/g)) {
+    const n = Number(m[1]);
+    const node = turn._pages?.[n - 1];
+    if (node) refs[n] = { id: node.id, title: node.title || node.url, host: node.host, url: node.url };
+  }
+  return refs;
+}
+
+function refFor(turn, n) {
+  const node = turn._pages?.[n - 1];
+  if (node) return { id: node.id, title: node.title || node.url, host: node.host, url: node.url };
+  return turn.refs?.[n] || null;
+}
+
+// Citations become buttons: clicking one opens that page's drawer beside the
+// conversation (the drawer's "Go to tab" is the actual jump).
+function askAnswerHtml(turn) {
+  return mdToHtml(turn.a).replace(/\[(\d+)\]/g, (whole, digits) => {
+    const n = Number(digits);
+    const ref = refFor(turn, n);
+    if (!ref) return whole;
+    const label = (ref.title || ref.host)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    return `<button class="cite" data-node="${ref.id}" title="${label}">${n}</button>`;
+  });
+}
+
+function wireCitations(el) {
+  for (const btn of el.querySelectorAll('.cite')) {
+    btn.onclick = () => openAskSource(btn.dataset.node);
+  }
+}
+
+function openAskSource(nodeId) {
+  if (!nodes.some((n) => n.id === nodeId)) {
+    toast('That page is no longer in this workspace.');
+    return;
+  }
+  selectedNodeId = nodeId;
+  renderDrawer();
+  cy?.elements(':selected').unselect();
+  cy?.getElementById(nodeId).select();
+}
+
+// Repaint just the streaming answer, leaving the rest of the thread (and the
+// user's scroll position) alone.
+function paintAskAnswer(turn) {
+  if (!askStreamEl || !turn.streaming) return;
+  askStreamEl.innerHTML = askAnswerHtml(turn);
+  wireCitations(askStreamEl);
+  const thread = $('ask-thread');
+  const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+  if (atBottom) thread.scrollTop = thread.scrollHeight;
+}
+
+function askTurnEl(turn) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ask-turn';
+
+  const q = document.createElement('div');
+  q.className = 'ask-q';
+  q.textContent = turn.q;
+  wrap.appendChild(q);
+
+  if (turn.error) {
+    const err = document.createElement('div');
+    err.className = 'ask-error';
+    err.textContent = turn.error + (turn.hint ? ` ${turn.hint}` : '');
+    wrap.appendChild(err);
+  }
+
+  const a = document.createElement('div');
+  a.className = 'ask-a md';
+  if (turn.a) {
+    a.innerHTML = askAnswerHtml(turn);
+    wireCitations(a);
+  } else if (turn.streaming) {
+    a.innerHTML = '<p class="muted">Reading your trail…</p>';
+  }
+  if (turn.a || turn.streaming) wrap.appendChild(a);
+  if (turn.streaming) askStreamEl = a;
+
+  const cited = Object.entries(turn.refs || {}).sort((x, y) => Number(x[0]) - Number(y[0]));
+  if (cited.length && !turn.streaming) {
+    const sources = document.createElement('div');
+    sources.className = 'ask-sources';
+    for (const [n, ref] of cited) {
+      const chip = document.createElement('span');
+      chip.className = 'ask-source';
+      const img = document.createElement('img');
+      img.src = faviconUrl(ref.url, 16);
+      img.alt = '';
+      const label = document.createElement('button');
+      label.className = 'ask-source-label';
+      label.textContent = `${n}. ${truncate(ref.title || ref.host, 52)}`;
+      label.title = `${ref.title}\n${ref.url}`;
+      label.onclick = () => openAskSource(ref.id);
+      const go = document.createElement('button');
+      go.className = 'ask-source-go';
+      go.textContent = '↗';
+      go.title = 'Open this page — switches to its tab, or reopens it';
+      go.onclick = () => send({ type: 'focus-node', nodeId: ref.id });
+      chip.append(img, label, go);
+      sources.appendChild(chip);
+    }
+    wrap.appendChild(sources);
+  }
+  return wrap;
+}
+
+const ASK_STARTERS = [
+  'Which page should I go to next, and why?',
+  'What have I actually learned so far?',
+  'What am I still missing?',
+];
+
+function askEmptyEl() {
+  const el = document.createElement('div');
+  el.className = 'ask-empty';
+  const p = document.createElement('p');
+  p.textContent = nodes.length
+    ? 'Ask anything about this research. The model reads every page on the trail — summaries, your notes, your highlights, and how the pages link — and answers with links back to the pages it used.'
+    : 'Nothing captured in this workspace yet. Browse a little, then come back and ask.';
+  el.appendChild(p);
+  if (nodes.length) {
+    const row = document.createElement('div');
+    row.className = 'ask-starters';
+    for (const s of ASK_STARTERS) {
+      const btn = document.createElement('button');
+      btn.textContent = s;
+      btn.onclick = () => askQuestion(s);
+      row.appendChild(btn);
+    }
+    el.appendChild(row);
+  }
+  return el;
+}
+
+function renderAsk() {
+  const thread = $('ask-thread');
+  askStreamEl = null;
+  thread.textContent = '';
+  if (!askThread.length) {
+    thread.appendChild(askEmptyEl());
+  } else {
+    for (const turn of askThread) thread.appendChild(askTurnEl(turn));
+  }
+  thread.scrollTop = thread.scrollHeight;
+  renderAskContext();
+}
+
+function renderAskContext() {
+  const withNotes = nodes.filter((n) => n.notes?.trim()).length;
+  const highlights = nodes.reduce((sum, n) => sum + (n.highlights?.length || 0), 0);
+  const summarized = nodes.filter((n) => n.summary?.length).length;
+  const bits = [`${nodes.length} page${nodes.length === 1 ? '' : 's'}`];
+  if (summarized) bits.push(`${summarized} summarized`);
+  if (withNotes) bits.push(`${withNotes} with your notes`);
+  if (highlights) bits.push(`${highlights} highlight${highlights === 1 ? '' : 's'}`);
+  $('ask-context').textContent = journey
+    ? `Reading “${journey.name}” — ${bits.join(' · ')}.`
+    : '';
+}
+
 // ---------- Timeline ----------
 
 function renderTimeline() {
@@ -2064,6 +2390,7 @@ function wireSettings() {
     if (!journey) return;
     if (!window.confirm(`Delete "${journey.name}" and all its pages, notes, and highlights? This cannot be undone.`)) return;
     await send({ type: 'delete-journey', journeyId: journey.id });
+    localStorage.removeItem(askKey(journey.id));
     modal.close();
     location.href = 'journey.html';
   };

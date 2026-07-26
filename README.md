@@ -4,7 +4,7 @@
 
 A Chrome extension that replaces tab anxiety with a map. As you browse, it builds a live graph of every page and how they connect — clicked links, new-tab branches, same-site clusters, and (via a local Ollama model) semantic similarity. The **side panel** always shows where you are in that web: your current page ringed, open tabs lit, closed pages dimmed but never lost — click any node to jump to its tab or resurrect it. Closing a tab is *parking*, not losing: the page stays on the map with its summary, your notes, and its connections.
 
-You're always in a **workspace** (like a tab group that remembers everything); switch or create them from the toolbar popup. Add notes and highlights as you go, then export any workspace as a Markdown report.
+You're always in a **workspace** (like a tab group that remembers everything); switch or create them from the toolbar popup. Add notes and highlights as you go, ask the workspace questions and get answers that cite the pages they came from, then export the whole thing as a Markdown report.
 
 Everything stays on your machine: page text lives in the browser's IndexedDB, and all AI runs against your local Ollama instance (with one opt-in exception, noted under Privacy).
 
@@ -24,7 +24,7 @@ Everything stays on your machine: page text lives in the browser's IndexedDB, an
 
 ## Ollama setup (optional but recommended)
 
-The extension works without Ollama — you still get the graph, timeline, notes, and highlights. With Ollama you also get per-page bullet summaries, topic tags, AI-discovered connections between pages on different sites, and one-click journey synthesis.
+The extension works without Ollama — you still get the graph, timeline, notes, and highlights. With Ollama you also get per-page bullet summaries, topic tags, AI-discovered connections between pages on different sites, one-click journey synthesis, and the **Ask** tab (a conversation with everything the workspace has collected).
 
 1. Install [Ollama](https://ollama.com). Any chat model you already have works — the extension auto-picks an installed model for summaries, synthesis, *and* connection-finding (the chat model reads page summaries in one batch call and proposes related pairs). Optionally add a dedicated embedding model, which makes connection-finding cheaper and scales past ~60 pages per journey:
    ```sh
@@ -50,6 +50,7 @@ If Ollama is offline, AI jobs queue up and run automatically when it comes back.
    - Nodes are pages, sized by reading time and revisits; pages on the same domain cluster into dashed boxes.
    - Solid gray arrows = clicked links; blue = opened in a new tab; purple dashed = AI-found similarity (with a label explaining the connection); orange = connections you drew yourself.
    - Click a node for the drawer: summary bullets, tags, your notes, highlights, and all its connections.
+   - The **Ask** tab is a conversation with the whole workspace: every page, its summary and tags, your notes, your highlights, and how the pages link. Ask *"which link has the document list for the self-insurance application?"* and you get a short answer with **numbered citations** — click one and that page's drawer opens beside the answer, with ↗ to jump to its tab. Threads are per workspace and survive a reload; **Clear** starts over. (The side panel's **Ask** button opens the same tab.)
    - **✨ Synthesize** asks Ollama for a journey-level overview: what you're researching, key threads, tensions between sources, and gaps.
    - **🔗 Find connections** runs the embedding similarity pass across everything captured so far.
    - The **Timeline** tab shows the same trail chronologically, with branch points marked.
@@ -74,6 +75,7 @@ It's wired into the trail rather than standalone on purpose: the workspace name 
 - Page text storage can be turned off entirely in settings (you lose summaries/similarity).
 - The Amtshelfer content script is injected into all pages (that's how the hover toolbar can exist), but it detects the page language locally and goes inert on non-German pages; it stores paragraph state in IndexedDB, keyed by a hash of the text.
 - **Network:** by default, the only requests are to your own local Ollama instance; favicons come from Chrome's local favicon cache. The one exception is opt-in: if you set an API key and switch Amtshelfer's Explain backend to Gemini, the selected paragraph (plus your workspace goal and page summaries, if page context is enabled) is sent to Google's API. Leave the backend on Ollama and nothing ever leaves your machine.
+- **Ask** talks only to your local Ollama (there's no cloud path for it), but note what it sends: to answer, the model is given the workspace's page summaries, your notes and your saved highlights. Ask transcripts live in the journey page's `localStorage` and are deleted with the workspace.
 - Delete any page, connection, or whole journey from the UI.
 
 ## Architecture
@@ -86,7 +88,9 @@ extension/
   capture.js             injected on capture: Readability text extraction
   lib/
     db.js                IndexedDB wrapper (journeys / nodes / edges / jobs)
-    ollama.js            Ollama client + prompt builders
+    ollama.js            Ollama client (batch + streaming) + prompt builders
+    ask.js               "Ask this workspace": ranks pages against the question
+                         and packs the trail into one grounded prompt
     util.js              URL canonicalization, domain grouping, settings
   popup/                 workspace switcher, pause, quick actions
   panel/                 side panel: live "you are here" mini-map
@@ -111,6 +115,10 @@ There is no build step — edit a file, hit reload on `chrome://extensions`, don
 | manual | you, via *Connect to…* in the node drawer |
 
 URLs are canonicalized before deduping: hash fragments and tracking params (`utm_*`, `fbclid`, `gclid`, …) are stripped, so revisits merge into one node with a visit history.
+
+### How Ask builds its context
+
+A workspace can hold a hundred pages, and a local model can't read them all, so the prompt comes in two tiers (and asks Ollama for a 16k context window, since a silently truncated prompt would drop exactly the material the answer is grounded in). The **index** lists every page once — number, title, site, its one-line handle, your notes and highlights — plus how the pages connect, so the model can see and point at the whole trail. The **detail** block then takes the handful of pages most likely to hold the answer and gives them in full: all summary bullets, notes, highlights, and a slice of the page text. Relevance is keyword-ranked against your question (your own words — hooks, notes, highlights — weigh most), and if the workspace has embeddings from *Find connections*, semantic similarity is blended in, which is what catches the German page you asked about in English. The detail block is rebuilt for every question, so a follow-up about a different corner of the research pulls in different pages; the index rides along on the first turn only.
 
 ## License
 
