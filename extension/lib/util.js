@@ -27,10 +27,43 @@ const TWO_PART_TLDS = new Set([
   'com.ua', 'org.ua', 'gov.ua', 'edu.ua', 'in.ua',
 ]);
 
+// Search engines keep the meaningful part of a URL in one or two params and
+// pad the rest with session and telemetry noise. Google's AI Mode is the
+// extreme case: every turn of a chat rewrites `mstk`, `aioh`, `cs`, `mtid`,
+// `csuir`… while `q` stays put, so a single conversation would otherwise land
+// on the map as thirty near-identical pages. For known search endpoints we keep
+// the query and the surface it was asked on (`udm=50` is AI Mode, `tbm` picks
+// images/news) and drop everything else — different queries stay different
+// pages, one conversation stays one page.
+const SEARCH_ENDPOINTS = [
+  { host: /(^|\.)google\.[a-z]{2,3}(\.[a-z]{2})?$/, path: /^\/search$/, keep: ['q', 'udm', 'tbm'] },
+  { host: /(^|\.)bing\.com$/, path: /^\/search$/, keep: ['q'] },
+  { host: /(^|\.)duckduckgo\.com$/, path: /^\/$/, keep: ['q', 'ia'] },
+  { host: /(^|\.)search\.brave\.com$/, path: /^\/search$/, keep: ['q'] },
+  { host: /(^|\.)ecosia\.org$/, path: /^\/search$/, keep: ['q'] },
+  { host: /(^|\.)startpage\.com$/, path: /^\/(sp\/)?search$/, keep: ['query', 'q'] },
+  { host: /(^|\.)youtube\.com$/, path: /^\/results$/, keep: ['search_query'] },
+];
+
+function searchParamsToKeep(u) {
+  return SEARCH_ENDPOINTS.find((e) => e.host.test(u.hostname) && e.path.test(u.pathname))?.keep;
+}
+
 export function canonicalUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
     u.hash = '';
+
+    const keep = searchParamsToKeep(u);
+    if (keep) {
+      const kept = keep
+        .map((k) => [k, u.searchParams.get(k)])
+        .filter(([, v]) => v !== null && v !== '');
+      u.search = '';
+      for (const [k, v] of kept) u.searchParams.set(k, v);
+      return u.toString();
+    }
+
     const toDelete = [];
     for (const key of u.searchParams.keys()) {
       if (TRACKING_PARAMS.some((re) => re.test(key))) toDelete.push(key);

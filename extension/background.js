@@ -111,7 +111,7 @@ async function rebuildTabState() {
     if (!tab.url || tab.incognito) continue;
     const canon = canonicalUrl(tab.url);
     const node = await db.getOneByIndex('nodes', 'byJourneyUrl', [journeyId, canon]);
-    if (node) tabState[tab.id] = { nodeId: node.id, url: canon };
+    if (node) tabState[tab.id] = { nodeId: node.id, url: canon, rawUrl: tab.url };
   }
   await sset('tabState', tabState);
   const settings = await getSettings();
@@ -135,7 +135,7 @@ async function adoptTab(tab, journeyId) {
   if (!node.visits.length) node.visits.push({ at: Date.now(), from: null });
   await db.put('nodes', node);
   const tabState = await sget('tabState', {});
-  tabState[tab.id] = { nodeId: node.id, url: canon };
+  tabState[tab.id] = { nodeId: node.id, url: canon, rawUrl: tab.url };
   await sset('tabState', tabState);
   try {
     await chrome.scripting.executeScript({
@@ -168,6 +168,114 @@ chrome.runtime.onStartup.addListener(() => {
   onBoot();
   rebuildTabState();
 });
+
+// ---------- Re-canonicalization ----------
+//
+// canonicalUrl gains rules over time (most recently: search URLs collapse to
+// their query, so one Google AI Mode conversation stops minting a page per
+// turn). Pages captured under the older rules keep their old URLs, so this
+// folds each group that now canonicalizes the same way into one page, carrying
+// everything attached to any of them. Runs once per rule version, on whatever
+// event wakes the worker first.
+const CANON_VERSION = 2;
+
+async function migrateCanonicalUrls() {
+  const { canonVersion = 0 } = await chrome.storage.local.get('canonVersion');
+  if (canonVersion >= CANON_VERSION) return;
+
+  const groups = new Map(); // journey + canonical URL -> the pages that share it
+  for (const node of await db.getAll('nodes')) {
+    const canon = canonicalUrl(node.url);
+    const key = `${node.journeyId}\n${canon}`;
+    if (!groups.has(key)) groups.set(key, { canon, nodes: [] });
+    groups.get(key).nodes.push(node);
+  }
+
+  let merged = 0;
+  const touched = new Set();
+  for (const { canon, nodes } of groups.values()) {
+    if (nodes.length === 1 && nodes[0].url === canon) continue;
+    merged += await mergeNodeGroup(canon, nodes);
+    touched.add(nodes[0].journeyId);
+  }
+
+  await chrome.storage.local.set({ canonVersion: CANON_VERSION });
+  if (merged) {
+    console.log(`[Research Trail] merged ${merged} duplicate page${merged === 1 ? '' : 's'}`);
+    for (const id of touched) notifyTrailUpdated(id);
+    notifyTabsUpdated();
+  }
+}
+
+// Fold a group of duplicate pages into one. The survivor is whichever copy has
+// the most to lose (text, then a summary, then age) — everything the others
+// hold (visits, reading time, notes, highlights, tags, edges) moves onto it.
+// Returns how many pages disappeared.
+async function mergeNodeGroup(canon, nodes) {
+  const richness = (n) => (n.text || '').length + (n.summary?.length ? 5000 : 0)
+    + (n.notes ? 3000 : 0) + (n.highlights?.length || 0) * 1000;
+  const ordered = [...nodes].sort((a, b) => richness(b) - richness(a) || a.createdAt - b.createdAt);
+  const [keep, ...drop] = ordered;
+
+  for (const other of drop) {
+    keep.visits = [...(keep.visits || []), ...(other.visits || [])];
+    keep.timeSpent = (keep.timeSpent || 0) + (other.timeSpent || 0);
+    keep.highlights = [...(keep.highlights || []), ...(other.highlights || [])];
+    keep.tags = [...new Set([...(keep.tags || []), ...(other.tags || [])])].slice(0, 8);
+    keep.createdAt = Math.min(keep.createdAt, other.createdAt);
+    if (other.notes) keep.notes = keep.notes ? `${keep.notes}\n\n${other.notes}` : other.notes;
+    for (const field of ['title', 'excerpt', 'text', 'thumb', 'hook', 'embedding', 'topicId']) {
+      if (!keep[field] && other[field]) keep[field] = other[field];
+    }
+    if (!keep.summary?.length && other.summary?.length) keep.summary = other.summary;
+  }
+  keep.visits.sort((a, b) => a.at - b.at);
+  // One arrival recorded twice (the same navigation landing on two copies) is
+  // one visit; anything with a distinct timestamp really was a separate visit.
+  keep.visits = keep.visits.filter((v, i) => i === 0 || v.at !== keep.visits[i - 1].at);
+  const seenHighlights = new Set();
+  keep.highlights = keep.highlights.filter((h) => !seenHighlights.has(h.text) && seenHighlights.add(h.text));
+
+  await rewireEdges(keep, new Map(drop.map((n) => [n.id, keep.id])));
+
+  for (const other of drop) {
+    for (const job of await db.getByIndex('jobs', 'byJourney', other.journeyId)) {
+      if (job.nodeId === other.id) await db.remove('jobs', job.id);
+    }
+    await db.remove('nodes', other.id);
+  }
+  // Only now: the [journey, url] index is unique, so the copies have to be
+  // gone before the survivor can take the canonical URL.
+  keep.url = canon;
+  await db.put('nodes', keep);
+  return drop.length;
+}
+
+// Point every edge that touched a merged-away page at the survivor, dropping
+// the self-edges that creates and folding duplicates into one with a count.
+async function rewireEdges(keep, idMap) {
+  for (const edge of await db.getByIndex('edges', 'byJourney', keep.journeyId)) {
+    const from = idMap.get(edge.from) || edge.from;
+    const to = idMap.get(edge.to) || edge.to;
+    if (from === edge.from && to === edge.to) continue;
+    if (from === to) {
+      await db.remove('edges', edge.id);
+      continue;
+    }
+    const existing = await db.getOneByIndex('edges', 'byJourneyPair', [edge.journeyId, from, to, edge.type]);
+    if (existing && existing.id !== edge.id) {
+      existing.count = (existing.count || 1) + (edge.count || 1);
+      await db.put('edges', existing);
+      await db.remove('edges', edge.id);
+    } else {
+      edge.from = from;
+      edge.to = to;
+      await db.put('edges', edge);
+    }
+  }
+}
+
+migrateCanonicalUrls().catch((e) => console.error('[Research Trail] canonical migration failed', e));
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'open-panel') {
@@ -379,8 +487,19 @@ async function handleNavigation(details) {
   let tabState = await sget('tabState', {});
   const canon = canonicalUrl(url);
 
-  // Same-page navigation (hash change, canonical-equal SPA update): nothing to do.
-  if (tabState[tabId]?.url === canon) return;
+  // Same page as far as the map is concerned (hash change, canonical-equal SPA
+  // update): no new node, no new edge. But if the raw URL moved, the page
+  // itself probably did too — a Google AI Mode chat rewrites its session token
+  // on every turn while the answer text keeps growing — so re-read the page and
+  // let the node carry the whole conversation instead of only its first turn.
+  if (tabState[tabId]?.url === canon) {
+    if (tabState[tabId].rawUrl !== url) {
+      tabState[tabId].rawUrl = url;
+      await sset('tabState', tabState);
+      recaptureSoon(tabId);
+    }
+    return;
+  }
 
   if (focus?.tabId === tabId) await flushFocusTime();
 
@@ -450,7 +569,7 @@ async function handleNavigation(details) {
   node.visits.push({ at: Date.now(), from: edgeFrom });
   await db.put('nodes', node);
 
-  tabState[tabId] = { nodeId: node.id, url: canon };
+  tabState[tabId] = { nodeId: node.id, url: canon, rawUrl: url };
   await sset('tabState', tabState);
   if (!focus || focus.tabId === tabId) await setFocus(tabId, node.id);
 
@@ -512,6 +631,32 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   const entry = tabState[details.tabId];
   if (entry?.nodeId) maybeCaptureThumb(details.tabId, entry.nodeId);
 });
+
+// Re-read a page that changed under a URL the map already knows (chat-style
+// surfaces: every answer rewrites the query string but it's still one page).
+// Delayed, because the new answer is usually still streaming in, and throttled
+// per tab so a fast conversation doesn't re-parse the DOM on every turn.
+// Best-effort by design: if the worker sleeps before the timer fires, the next
+// turn schedules another one.
+const RECAPTURE_DELAY_MS = 6000;
+const RECAPTURE_MIN_GAP_MS = 20000;
+const recaptureAt = new Map();
+
+function recaptureSoon(tabId) {
+  const now = Date.now();
+  if (now - (recaptureAt.get(tabId) || 0) < RECAPTURE_MIN_GAP_MS) return;
+  recaptureAt.set(tabId, now);
+  setTimeout(async () => {
+    const tabState = await sget('tabState', {});
+    if (!tabState[tabId]?.nodeId) return;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['vendor/Readability.js', 'capture.js'],
+      });
+    } catch { /* tab gone or not scriptable — nothing lost */ }
+  }, RECAPTURE_DELAY_MS);
+}
 
 // ---------- Moving pages between workspaces ----------
 // Relocates pages with everything attached to them. Edges fully inside the
@@ -711,7 +856,7 @@ async function handleMessage(msg, sender) {
             : null;
           if (node) {
             activeNodeId = node.id;
-            tabState[activeTab.id] = { nodeId: node.id, url: canon };
+            tabState[activeTab.id] = { nodeId: node.id, url: canon, rawUrl: activeTab.url };
             await sset('tabState', tabState);
           }
         }
@@ -742,7 +887,18 @@ async function handleMessage(msg, sender) {
           await sset('tabState', tabState);
         }
       }
-      await chrome.tabs.create({ url: node.url, active: true });
+      const tab = await chrome.tabs.create({ url: node.url, active: true });
+      // Reopening a parked page from the map/panel is deliberate work on this
+      // research, not a fresh entry point — record where it came from (itself)
+      // so auto-return doesn't read it as ambient browsing and bounce the
+      // session to Scratch. The self-reference creates no edge.
+      const { activeJourneyId } = await getActive();
+      if (node.journeyId === activeJourneyId) {
+        const openers = await sget('openers', {});
+        openers[tab.id] = node.id; // same workspace only — edges never cross one
+        await sset('openers', openers);
+      }
+      await chrome.storage.local.set({ lastCaptureAt: Date.now() });
       return { reopened: true };
     }
 
@@ -1046,6 +1202,7 @@ async function onPageCaptured(payload, sender) {
 
   const settings = await getSettings();
   const hadContent = !!(node.text || node.excerpt);
+  const prevLength = (node.text || '').length;
   node.title = payload.title || node.title;
   node.excerpt = payload.excerpt || node.excerpt;
   if (settings.captureText) node.text = payload.text || node.text;
@@ -1056,7 +1213,13 @@ async function onPageCaptured(payload, sender) {
   // mode), skip the expensive per-page summary entirely — auto-organization
   // only needs embeddings, and pages get summarized later if they're ever
   // promoted into a real workspace.
-  if (!hadContent && !node.summary?.length && (node.text || node.excerpt)) {
+  //
+  // The exception: a page whose content keeps growing under one URL (a Google
+  // AI Mode chat, an infinite feed). Once it has half again as much text as
+  // when we last read it, the old summary describes the first turn of a long
+  // conversation — worth spending one job to redo.
+  const grewSubstantially = hadContent && (node.text || '').length > prevLength * 1.5 + 500;
+  if ((!hadContent && !node.summary?.length && (node.text || node.excerpt)) || grewSubstantially) {
     const journey = await db.get('journeys', activeJourneyId);
     const lite = settings.scratchLite && isScratch(journey);
     if (!lite) await enqueueJob(activeJourneyId, 'summarize', node.id);
