@@ -4,8 +4,16 @@
 // page JavaScript.
 (() => {
   // Guard against double-injection (SPA navigations can re-fire onCompleted).
-  if (window.__researchTrailCaptured === location.href) return;
-  window.__researchTrailCaptured = location.href;
+  // Time-limited, not one-shot: several schedulers may capture the same href
+  // on purpose at different moments — the SPA settle pass at +2.5s, then the
+  // streaming-aware recapture at +6s reading the full answer — and a
+  // permanent per-href stamp made whichever fired first block the better-
+  // timed one. Burst re-fires land within milliseconds; anything a second
+  // apart is a deliberate re-read. (Old versions stored a bare string here;
+  // `last.href` is then undefined and we just capture, which is fine.)
+  const last = window.__researchTrailCaptured;
+  if (last && last.href === location.href && Date.now() - last.at < 1500) return;
+  window.__researchTrailCaptured = { href: location.href, at: Date.now() };
 
   let article = null;
   try {

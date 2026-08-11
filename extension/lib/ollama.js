@@ -226,12 +226,19 @@ export async function embedBatch(texts) {
 export function isOfflineError(err) {
   const msg = String(err?.message || err);
   return (
-    err?.name === 'TimeoutError' ||
-    err?.name === 'AbortError' ||
     msg.includes('Failed to fetch') ||
     msg.includes('NetworkError') ||
     msg.includes('403') // Ollama rejects unknown origins until OLLAMA_ORIGINS is set
   );
+}
+
+// A timed-out call is NOT offline: Ollama answered the TCP handshake and then
+// outran its budget. Treating it as offline made a job whose call always times
+// out retry forever without ever counting an attempt — the queue must count
+// these so a permanently-too-slow job eventually parks as errored (and shows
+// up as retryable in the UI) instead of silently spinning for weeks.
+export function isTimeoutError(err) {
+  return err?.name === 'TimeoutError' || err?.name === 'AbortError';
 }
 
 // ---- Prompt builders ----

@@ -3,6 +3,7 @@
 import * as db from '../lib/db.js';
 import {
   baseDomain, formatDuration, faviconUrl, getSettings, saveSettings, truncate,
+  makeConnectorClassifier, thinPage, isEmbeddable,
 } from '../lib/util.js';
 import { ASK_SYSTEM_PROMPT, buildIndexBlock, buildDetailBlock } from '../lib/ask.js';
 import { chatStream } from '../lib/ollama.js';
@@ -42,6 +43,7 @@ let selectedTopicId = null; // which Scratch topic's map is open (null = topic l
 let activeSuggestion = null; // split suggestion being previewed
 let previewActive = false;
 let scratchLiteActive = false; // viewing Scratch while lite processing is on
+let embedDisabledActive = false; // installed model can't embed — no vectors are coming
 
 function isScratchJourney(j) {
   return j?.kind === 'scratch' || j?.name === 'Scratch';
@@ -159,6 +161,9 @@ async function loadData(id) {
   edges = await db.getByIndex('edges', 'byJourney', id);
   const scratch = isScratchJourney(journey);
   scratchLiteActive = scratch && (await getSettings()).scratchLite !== false;
+  // The "Not yet organized" breakdown must not claim pages are "waiting for
+  // AI" when the installed model can't embed at all — nothing is coming.
+  embedDisabledActive = !!(await chrome.storage.local.get('embedDisabled')).embedDisabled;
   topics = scratch ? await db.getByIndex('topics', 'byJourney', id) : [];
   if (selectedTopicId && !topics.some((t) => t.id === selectedTopicId) && selectedTopicId !== '__unsorted') {
     selectedTopicId = null; // topic got merged away or deleted
@@ -439,12 +444,47 @@ function renderTopicsView() {
     const to = fmt(lastVisit(members));
     meta.textContent = `${members.length} page${members.length === 1 ? '' : 's'} · ${from === to ? from : `${from} – ${to}`}`;
     main.append(name, meta);
-    const sampleHooks = members.map((n) => n.hook).filter(Boolean).slice(0, 2);
-    if (sampleHooks.length) {
-      const hooks = document.createElement('div');
-      hooks.className = 'topic-hooks';
-      hooks.textContent = sampleHooks.join('  ·  ');
-      main.appendChild(hooks);
+    if (key === '__unsorted') {
+      // Honest accounting instead of two arbitrary page hooks: say WHY each
+      // page is unorganized, using the organizer's own classification (shared
+      // via lib/util.js so this can't drift from what clustering does).
+      // Sorted biggest-cause-first so it survives the ellipsis; full list on
+      // hover.
+      const isConn = makeConnectorClassifier(edges);
+      const counts = { noText: 0, utility: 0, waiting: 0, loose: 0 };
+      for (const n of members) {
+        if (thinPage(n) || !isEmbeddable(n)) counts.noText++;
+        else if (isConn(n)) counts.utility++;
+        else if (!n.embedding) counts.waiting++;
+        else counts.loose++;
+      }
+      const labels = {
+        noText: 'app screens with no readable text (heal on revisit)',
+        utility: 'utility pages — searches, carts, logins',
+        waiting: embedDisabledActive
+          ? 'unprocessed — install an embedding model'
+          : 'waiting for AI',
+        loose: 'loose ends — no related pages yet',
+      };
+      const parts = Object.entries(counts)
+        .filter(([, c]) => c > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, c]) => `${c} ${labels[k]}`);
+      if (parts.length) {
+        const why = document.createElement('div');
+        why.className = 'topic-hooks';
+        why.textContent = parts.join('  ·  ');
+        why.title = parts.join('\n');
+        main.appendChild(why);
+      }
+    } else {
+      const sampleHooks = members.map((n) => n.hook).filter(Boolean).slice(0, 2);
+      if (sampleHooks.length) {
+        const hooks = document.createElement('div');
+        hooks.className = 'topic-hooks';
+        hooks.textContent = sampleHooks.join('  ·  ');
+        main.appendChild(hooks);
+      }
     }
 
     const favs = document.createElement('div');

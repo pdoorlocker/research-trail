@@ -183,6 +183,60 @@ export function truncate(text, max) {
   return text.length <= max ? text : text.slice(0, max) + '…';
 }
 
+// ---------- Scratch organization classification ----------
+// Shared by the background organizer and the journey page so both apply the
+// exact same rules: the organizer to decide what may cluster, the UI to
+// explain WHY a page sits in "Not yet organized".
+
+// Utility/hub pages — carts, checkouts, sign-ins, search results, captchas,
+// account pages — sit in the middle of click-chains and BRIDGE unrelated
+// threads: buying a bag and buying straws both pass through the same Amazon
+// basket, and edge transitivity would weld them (and the bank login used to
+// pay) into one mega-topic. Such pages never bind components; they get
+// labeled from a neighbor after the real clusters form. The search patterns
+// here must cover everything the organizer's SEARCH_HUB_RE matches: its hub
+// pass only fires for connectors, and a search page that ISN'T a connector
+// is worse than useless — its plain edges weld every result it links.
+export const CONNECTOR_RE = /(checkout|\/cart|basket|add-to-cart|sign[-_]?in|log[-_]?in|login|signin|auth|payment|captcha|verified\.|\/search\?|[?&]q=|[?&]query=|[?&]search_query=|thankyou|\/buy\/|orders?[/.-]|order-|\/track|tracking|\/help|customer|contact|returns?\b|support|account)/i;
+
+// No real captured text (title-only) is the same "nothing to say about this
+// page" state that already denies it a hook and a summary — an account
+// dashboard's URL scheme varies by site and a keyword list will always miss
+// one, but "Readability found no body copy" generalizes: such pages are app
+// shells / interstitials, never a topic in their own right, and their
+// (title-only or absent) embedding is too generic to trust for similarity.
+export const thinPage = (n) => !n.text && (!n.excerpt || n.excerpt.trim().length < 25);
+
+// The exact text an embed job reads; anything under 20 trimmed chars is
+// skipped by the embedder, so backfills and UIs must use the same bar.
+export function embedInput(node) {
+  return truncate(`${node.title}\n${node.text || node.excerpt || ''}`, 8000);
+}
+
+export function isEmbeddable(node) {
+  return embedInput(node).trim().length >= 20;
+}
+
+// Behavioral hub signals beyond URL patterns: a page clicked to/from many
+// others, or revisited across separate days, is a waypoint ("Your Orders",
+// a site's homepage) — not a topic. Such pages are what welded yesterday's
+// shopping to today's package-tracking.
+export function makeConnectorClassifier(edges) {
+  const degree = new Map();
+  for (const e of edges) {
+    if (e.type === 'similar') continue;
+    degree.set(e.from, (degree.get(e.from) || 0) + 1);
+    degree.set(e.to, (degree.get(e.to) || 0) + 1);
+  }
+  const visitDaySpan = (n) => new Set(n.visits.map((v) => new Date(v.at).toDateString())).size;
+  return (n) =>
+    CONNECTOR_RE.test(n.url)
+    || /^(just a moment|sign in|log ?in)/i.test(n.title || '')
+    || thinPage(n)
+    || (degree.get(n.id) || 0) >= 6
+    || (n.visits.length >= 4 && visitDaySpan(n) >= 2);
+}
+
 export function formatDuration(seconds) {
   if (!seconds || seconds < 1) return '0s';
   if (seconds < 60) return `${Math.round(seconds)}s`;

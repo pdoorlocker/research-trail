@@ -9,6 +9,7 @@
 import * as db from './lib/db.js';
 import {
   canonicalUrl, hostOf, baseDomain, isCapturable, uid, cosine, truncate, getSettings,
+  makeConnectorClassifier, embedInput, isEmbeddable,
 } from './lib/util.js';
 import * as ollama from './lib/ollama.js';
 // Amtshelfer (DE→EN translation + Explain for Austrian gov sites) runs as a
@@ -472,12 +473,19 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   handleNavigation(details).catch((e) => console.error('onCommitted', e));
 });
 
-// SPA navigations (History API) — treated as in-tab link navigations.
+// SPA navigations (History API) — treated as in-tab link navigations. These
+// never fire onCompleted, so without an explicit capture the nodes they mint
+// stay title-less and text-less forever: no embedding, invisible to
+// clustering, permanent residents of "Not yet organized" (Netflix, Gemini,
+// and every app-shell screen). Capture only when a NEW page was tracked —
+// the same-canonical path schedules its own recapture with streaming-aware
+// timing, and racing it here would capture a half-streamed answer and then
+// let capture.js's per-href guard block the properly-timed read.
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId !== 0) return;
-  handleNavigation({ ...details, transitionType: 'link' }).catch((e) =>
-    console.error('onHistoryStateUpdated', e),
-  );
+  handleNavigation({ ...details, transitionType: 'link' })
+    .then((tracked) => { if (tracked) captureSpaSoon(details.tabId); })
+    .catch((e) => console.error('onHistoryStateUpdated', e));
 });
 
 async function handleNavigation(details) {
@@ -575,6 +583,7 @@ async function handleNavigation(details) {
 
   ensureTabInWorkspaceGroup(tabId, journeyId).catch(() => {});
   notifyTrailUpdated(journeyId);
+  return true; // a new page is now tracked in this tab (callers may capture it)
 }
 
 async function upsertNode(journeyId, canon, rawUrl) {
@@ -641,6 +650,35 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
 const RECAPTURE_DELAY_MS = 6000;
 const RECAPTURE_MIN_GAP_MS = 20000;
 const recaptureAt = new Map();
+
+// Read an SPA's new view once it has had a moment to render. Debounced per
+// tab, with the timer RESET on each route change (unlike recaptureSoon's
+// min-gap, which would drop captures): skimming quickly through app screens
+// coalesces into one capture of the page the user actually settled on —
+// intermediate views seen for two seconds aren't worth text anyway.
+// onPageCaptured routes the text by the page's own URL, so a capture always
+// lands on whichever node owns what the tab is showing when the timer fires.
+const SPA_CAPTURE_DELAY_MS = 2500;
+const spaCaptureTimers = new Map();
+
+function captureSpaSoon(tabId) {
+  clearTimeout(spaCaptureTimers.get(tabId));
+  spaCaptureTimers.set(tabId, setTimeout(async () => {
+    spaCaptureTimers.delete(tabId);
+    // Recording may have paused or stopped in the settle window — the
+    // onCompleted path re-checks this before injecting, so must we.
+    const { activeJourneyId, paused } = await getActive();
+    if (!activeJourneyId || paused) return;
+    const tabState = await sget('tabState', {});
+    if (!tabState[tabId]?.nodeId) return;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['vendor/Readability.js', 'capture.js'],
+      });
+    } catch { /* tab gone or not scriptable — nothing lost */ }
+  }, SPA_CAPTURE_DELAY_MS));
+}
 
 function recaptureSoon(tabId) {
   const now = Date.now();
@@ -1311,12 +1349,17 @@ async function recomputeSimilarity(journeyId) {
 // ---------- Ollama job queue ----------
 
 async function enqueueJob(journeyId, type, nodeId, payload = {}) {
+  const same = (j) => j.type === type && j.nodeId === nodeId && j.journeyId === journeyId
+      && JSON.stringify(j.payload) === JSON.stringify(payload);
   // Avoid queueing duplicate work for the same target.
   const pending = await db.getByIndex('jobs', 'byStatus', 'pending');
-  if (pending.some((j) => j.type === type && j.nodeId === nodeId && j.journeyId === journeyId
-      && JSON.stringify(j.payload) === JSON.stringify(payload))) {
-    return;
-  }
+  if (pending.some(same)) return;
+  // A fresh attempt supersedes parked failures of the same work: the auto
+  // paths (embed batches, refresh-topics) re-mint jobs freely, and without
+  // this the old errored copies pile up and keep the "N jobs failed" badge
+  // lit even after a retry succeeds.
+  const errored = (await db.getByIndex('jobs', 'byStatus', 'error')).filter(same);
+  if (errored.length) await db.removeKeys('jobs', errored.map((j) => j.id));
   await db.put('jobs', {
     id: uid(), journeyId, nodeId, type, payload,
     status: 'pending', attempts: 0, lastError: null, createdAt: Date.now(),
@@ -1409,6 +1452,18 @@ async function processQueue() {
           await db.put('jobs', j);
         }
         if (erroredAny) notifyTrailUpdated(affected[0].journeyId);
+        if (ollama.isTimeoutError(e)) {
+          // Ollama is up but this call outran its budget (model still
+          // loading, machine under load). The attempt is counted above so a
+          // job that ALWAYS times out eventually parks as errored instead of
+          // spinning forever — but retry on the alarm's schedule rather than
+          // hammering a struggling Ollama right now.
+          break;
+        }
+        // Genuine failure (unparsable output, HTTP error): leave a gap before
+        // the next attempt so four strikes on the same job aren't
+        // back-to-back full-price calls with zero breathing room.
+        await sleep(3000);
       } finally {
         queueCurrent = null;
       }
@@ -1424,7 +1479,7 @@ async function runEmbedBatch(jobs) {
   for (const j of jobs) {
     const node = await db.get('nodes', j.nodeId);
     if (!node) continue;
-    const input = truncate(`${node.title}\n${node.text || node.excerpt || ''}`, 8000);
+    const input = embedInput(node);
     if (input.trim().length < 20) continue;
     targets.push({ node, input });
   }
@@ -1487,6 +1542,38 @@ async function runJob(job) {
       if (nodes.length < 2) return;
       const edges = await db.getByIndex('edges', 'byJourney', journey.id);
 
+      // Self-heal embedding coverage before clustering. A node can have
+      // content but no vector: capture landed after its one embed job ran
+      // (SPA settle delay), or a batch skipped it but deleted the job
+      // anyway. Re-queue those — mirroring runEmbedBatch's own >= 20 char
+      // bar, so a node it would skip is never re-queued in an enqueue/skip
+      // loop. This run clusters without the missing vectors; the embed batch
+      // that fills them re-enqueues organize, which is how Scratch converges
+      // instead of stranding pages. Deliberately NOT via enqueueJob: this
+      // can queue hundreds of nodes (one shared jobs-table read beats a
+      // per-node index scan), and enqueueJob's errored-supersede would
+      // resurrect permanently-failing jobs with fresh attempts on every
+      // organize run — defeating the attempt cap in an endless churn loop.
+      // Parked failures stay parked; the failed-jobs UI is their retry path.
+      // (Skipped entirely when the installed model can't embed — those jobs
+      // would just be dropped again by the embed-unsupported handler.)
+      const { embedDisabled } = await chrome.storage.local.get('embedDisabled');
+      if (!embedDisabled) {
+        const embedJobbed = new Set(
+          (await db.getAll('jobs'))
+            .filter((j) => j.type === 'embed' && j.journeyId === journey.id)
+            .map((j) => j.nodeId),
+        );
+        for (const n of nodes) {
+          if (n.embedding || embedJobbed.has(n.id)) continue;
+          if (!isEmbeddable(n)) continue;
+          await db.put('jobs', {
+            id: uid(), journeyId: journey.id, nodeId: n.id, type: 'embed', payload: {},
+            status: 'pending', attempts: 0, lastError: null, createdAt: Date.now(),
+          });
+        }
+      }
+
       const idx = new Map(nodes.map((n, i) => [n.id, i]));
       const parent = nodes.map((_, i) => i);
       const find = (i) => {
@@ -1501,60 +1588,111 @@ async function runJob(job) {
         const rb = find(b);
         if (ra !== rb) parent[ra] = rb;
       };
-      // Utility/hub pages — carts, checkouts, sign-ins, search results,
-      // captchas, account pages — sit in the middle of click-chains and
-      // BRIDGE unrelated threads: buying a bag and buying straws both pass
-      // through the same Amazon basket, and edge transitivity would weld
-      // them (and the bank login used to pay) into one mega-topic. Such
-      // pages never bind components; they get labeled from a neighbor after
-      // the real clusters form.
-      const CONNECTOR_RE = /(checkout|\/cart|basket|add-to-cart|sign[-_]?in|log[-_]?in|login|signin|auth|payment|captcha|verified\.|\/search\?|[?&]q=|thankyou|\/buy\/|orders?[/.-]|order-|\/track|tracking|\/help|customer|contact|returns?\b|support|account)/i;
-      // Behavioral hub signals, beyond URL patterns: a page clicked to/from
-      // many others, or revisited across separate days, is a waypoint
-      // ("Your Orders", a site's homepage) — not a topic. Such pages are
-      // what welded yesterday's shopping to today's package-tracking.
-      const degree = new Map();
-      for (const e of edges) {
-        if (e.type === 'similar') continue;
-        degree.set(e.from, (degree.get(e.from) || 0) + 1);
-        degree.set(e.to, (degree.get(e.to) || 0) + 1);
-      }
-      const visitDaySpan = (n) => new Set(n.visits.map((v) => new Date(v.at).toDateString())).size;
-      // No real captured text (title-only) is the same "nothing to say about
-      // this page" state that already denies it a hook and a summary — an
-      // account dashboard's URL scheme varies by site and a keyword list will
-      // always miss one, but "Readability found no body copy" generalizes:
-      // such pages are app shells / interstitials, never a topic in their
-      // own right, and their (title-only or absent) embedding is too generic
-      // to trust for similarity either.
-      const thin = (n) => !n.text && (!n.excerpt || n.excerpt.trim().length < 25);
-      const isConnector = (n) =>
-        CONNECTOR_RE.test(n.url)
-        || /^(just a moment|sign in|log ?in)/i.test(n.title || '')
-        || thin(n)
-        || (degree.get(n.id) || 0) >= 6
-        || (n.visits.length >= 4 && visitDaySpan(n) >= 2);
+      // Utility/hub pages (carts, sign-ins, search results, thin app shells,
+      // high-traffic waypoints) never bind components — they'd weld
+      // unrelated threads — and get labeled from a neighbor after the real
+      // clusters form. The rules live in lib/util.js, shared with the
+      // journey page so its "Not yet organized" breakdown can't drift from
+      // what the organizer actually does.
+      const isConnector = makeConnectorClassifier(edges);
+      // Connector status is checked O(n²) times below; the regexes and visit
+      // scans behind it are per-node facts, so compute them once.
+      const connector = nodes.map(isConnector);
       for (const e of edges) {
         if (e.type === 'similar') continue; // raw cosine below is the better signal
         const a = idx.get(e.from);
         const b = idx.get(e.to);
         if (a == null || b == null) continue;
-        if (isConnector(nodes[a]) || isConnector(nodes[b])) continue;
+        if (connector[a] || connector[b]) continue;
         union(a, b);
       }
+
+      // Search pages are connectors — as graph nodes they'd weld everything
+      // they touch — but the QUERY they carry is the strongest topic signal
+      // ambient browsing produces: two pages clicked from the same search are
+      // almost always about the same thing. Dropping their edges wholesale
+      // orphaned every search-mediated read (result-A ← search → result-B
+      // contributed zero joins, and search is how most threads start).
+      // Recover the signal without letting the hub bind: union pairs of real
+      // pages whose click-throughs FROM the same search page landed in the
+      // same sitting. Distinct queries are distinct nodes (canonicalUrl keeps
+      // `q`), so this joins within one query, never across a whole engine.
+      // The sitting window covers engines whose query param is stripped by
+      // canonicalization — there one node spans many queries, and only
+      // clicks minutes apart can be trusted to share an intent.
+      // Query params only — a bare /results? path (pagination, sports
+      // scores) is not a search page; every real engine we canonicalize
+      // carries its query in one of these params (YouTube: search_query).
+      const SEARCH_HUB_RE = /(\/search\?|[?&]q=|[?&]query=|[?&]search_query=)/i;
+      const SEARCH_JOIN_WINDOW = 15 * 60 * 1000;
+      const hubArrivals = new Map();
+      nodes.forEach((n, i) => {
+        if (connector[i] && SEARCH_HUB_RE.test(n.url)) hubArrivals.set(n.id, []);
+      });
+      nodes.forEach((n, i) => {
+        if (connector[i]) return;
+        for (const v of n.visits) {
+          const arr = v.from && hubArrivals.get(v.from);
+          if (arr) arr.push({ i, at: v.at });
+        }
+      });
+      for (const arrivals of hubArrivals.values()) {
+        arrivals.sort((a, b) => a.at - b.at);
+        for (let k = 1; k < arrivals.length; k++) {
+          if (arrivals[k].at - arrivals[k - 1].at <= SEARCH_JOIN_WINDOW) {
+            union(arrivals[k - 1].i, arrivals[k].i);
+          }
+        }
+      }
+
+      // Similarity unions. nomic-embed's cosine range is compressed —
+      // unrelated web pages score 0.4-0.6, same-genre product pages higher —
+      // so a flat 0.55 single-linkage bar was below the noise floor for
+      // shopping pages: ONE borderline pair anywhere merged two whole
+      // threads, and transitivity grew a mega-topic that could never split.
+      // Two changes: a floor the noise can't reach, and union only MUTUAL
+      // top-K neighbors, so each page can pull in at most K others and a
+      // single borderline pair no longer bridges two big clusters.
+      const KNN_K = 3;
+      const KNN_FLOOR = 0.66;
+      const SESSION_FLOOR = 0.58; // same-sitting pages get a lower bar (time is corroborating evidence)
       const firstVisit = (n) => n.visits[0]?.at ?? n.createdAt;
+      const real = [];
       for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i];
-          const b = nodes[j];
-          if (!a.embedding || !b.embedding) continue;
-          if (isConnector(a) || isConnector(b)) continue; // cart/checkout embeddings are noise
-          const sim = cosine(a.embedding, b.embedding);
-          if (sim >= 0.55) union(i, j);
+        if (!connector[i] && nodes[i].embedding) real.push(i);
+      }
+      const top = new Map(real.map((i) => [i, []]));
+      const consider = (a, b, sim) => {
+        const list = top.get(a);
+        list.push({ j: b, sim });
+        list.sort((x, y) => y.sim - x.sim);
+        if (list.length > KNN_K) list.pop();
+      };
+      for (let x = 0; x < real.length; x++) {
+        for (let y = x + 1; y < real.length; y++) {
+          const i = real[x];
+          const j = real[y];
+          const sim = cosine(nodes[i].embedding, nodes[j].embedding);
+          if (sim >= KNN_FLOOR) {
+            consider(i, j, sim);
+            consider(j, i, sim);
+          }
+          // The session rule is NOT an else-branch: a same-sitting pair above
+          // the kNN floor must still union directly, or linkage would be
+          // non-monotone — a 0.70 pair crowded out of both top-K lists by
+          // denser neighbors would stay apart while a 0.60 pair unions here.
           // Time proximity chains transitively (page A ~ B ~ C … links a
           // whole evening into one mega-cluster), so it needs a stiff
           // similarity bar, not a loose one.
-          else if (sim >= 0.5 && Math.abs(firstVisit(a) - firstVisit(b)) < 10 * 60 * 1000) union(i, j);
+          if (sim >= SESSION_FLOOR
+              && Math.abs(firstVisit(nodes[i]) - firstVisit(nodes[j])) < 10 * 60 * 1000) {
+            union(i, j);
+          }
+        }
+      }
+      for (const [i, list] of top) {
+        for (const { j } of list) {
+          if (top.get(j)?.some((e) => e.j === i)) union(i, j);
         }
       }
 
@@ -1563,7 +1701,7 @@ async function runJob(job) {
       // threads can never weld them together).
       const comps = new Map();
       nodes.forEach((n, i) => {
-        if (isConnector(n)) return;
+        if (connector[i]) return;
         const root = find(i);
         if (!comps.has(root)) comps.set(root, []);
         comps.get(root).push(n);
@@ -1574,7 +1712,12 @@ async function runJob(job) {
       const toName = [];
       const liveTopicIds = new Set();
       let changed = false;
-      for (const members of comps.values()) {
+      // Biggest component first: a topic id (and its name) belongs to ONE
+      // component, so when a cluster splits, the largest surviving piece
+      // keeps the incumbent identity and the splinters mint fresh topics —
+      // not whichever fragment map iteration happened to visit first.
+      const ordered = [...comps.values()].sort((a, b) => b.length - a.length);
+      for (const members of ordered) {
         // A lone page isn't a theme — it stays in "Not yet organized"
         // rather than minting single-page topic confetti (and a naming
         // call). If related pages show up later, it clusters then.
@@ -1627,15 +1770,17 @@ async function runJob(job) {
       }
       // Connectors (carts, sign-ins, search pages) display alongside a real
       // neighbor when one exists — a pure label, never a bridge.
-      for (const n of nodes) {
-        if (!isConnector(n)) continue;
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const n = nodes[ni];
+        if (!connector[ni]) continue;
         let label = null;
         for (const e of edges) {
           if (e.type === 'similar') continue;
           const otherId = e.from === n.id ? e.to : e.to === n.id ? e.from : null;
           if (!otherId) continue;
-          const other = nodes[idx.get(otherId)];
-          if (other && !isConnector(other) && other.topicId) {
+          const oi = idx.get(otherId);
+          const other = oi != null ? nodes[oi] : null;
+          if (other && !connector[oi] && other.topicId) {
             label = other.topicId;
             break;
           }
@@ -1656,34 +1801,55 @@ async function runJob(job) {
       }
 
       if (toName.length) {
-        // Sample the pages that actually describe the theme — hostname-only
-        // entries tell the namer nothing.
-        const clusters = toName.map((e, i) => ({
-          n: i + 1,
-          pages: e.members
-            .filter((m) => m.hook || m.title)
-            .concat(e.members.filter((m) => !m.hook && !m.title))
-            .slice(0, 10)
-            .map((m) => m.hook || m.title || m.host),
-        }));
-        const { system, prompt } = ollama.clusterNamesPrompt(clusters);
-        const response = await ollama.generate(prompt, {
-          system, timeoutMs: 180000, numPredict: toName.length * 50 + 500,
-        });
-        const parsed = ollama.parseClusterNames(response, toName.length);
-        // A response with zero usable names is a failure, not a success —
-        // throwing lets the queue retry instead of leaving topics stuck at
-        // "Organizing…" forever. (Cluster assignments are already saved and
-        // survive the retry.)
-        if (!parsed.length) throw new Error('topic naming returned no parsable names');
-        for (const { n, name } of parsed) {
-          await db.update('topics', toName[n - 1].topic.id, (x) => {
-            x.name = truncate(String(name).trim(), 60);
-            x.updatedAt = Date.now();
-            return x;
-          });
+        // Name in small chunks, not one giant call: a batch covering dozens
+        // of topics regularly outran the generate timeout, and one timeout
+        // lost ALL the names. Chunks keep each call short, and names that DID
+        // parse are saved immediately — a retry only re-names what's still
+        // unnamed (toName is rebuilt from unnamed topics each run).
+        const NAME_CHUNK = 6;
+        const namedIds = new Set();
+        try {
+          for (let start = 0; start < toName.length; start += NAME_CHUNK) {
+            const slice = toName.slice(start, start + NAME_CHUNK);
+            // Sample the pages that actually describe the theme — hostname-only
+            // entries tell the namer nothing.
+            const clusters = slice.map((e, i) => ({
+              n: i + 1,
+              pages: e.members
+                .filter((m) => m.hook || m.title)
+                .concat(e.members.filter((m) => !m.hook && !m.title))
+                .slice(0, 10)
+                .map((m) => m.hook || m.title || m.host),
+            }));
+            const { system, prompt } = ollama.clusterNamesPrompt(clusters);
+            const response = await ollama.generate(prompt, {
+              system, timeoutMs: 120000, numPredict: slice.length * 50 + 200,
+            });
+            for (const { n, name } of ollama.parseClusterNames(response, slice.length)) {
+              await db.update('topics', slice[n - 1].topic.id, (x) => {
+                x.name = truncate(String(name).trim(), 60);
+                x.updatedAt = Date.now();
+                return x;
+              });
+              namedIds.add(slice[n - 1].topic.id);
+              changed = true;
+            }
+          }
+        } finally {
+          // Whatever landed before a timeout or parse failure should show up
+          // now, not after the retry settles. (Notify is debounced, so the
+          // success path's notify at the end of this case doesn't double-fire.)
+          if (changed) notifyTrailUpdated(journey.id);
         }
-        changed = true;
+        // Any topic still unnamed is a failure, not a success — a model that
+        // names 4 of 6 threads would otherwise leave real topics stuck at
+        // "Organizing…" forever. Throwing lets the queue retry; assignments
+        // and the names that did land are already saved, and the retry's
+        // toName is rebuilt from whatever is still unnamed.
+        const missing = toName.filter((e) => !namedIds.has(e.topic.id)).length;
+        if (missing) {
+          throw new Error(`topic naming: ${missing} of ${toName.length} topics still unnamed`);
+        }
       }
       if (changed) notifyTrailUpdated(journey.id);
       return;
