@@ -64,6 +64,7 @@ The reason this tool exists: reading Austrian government sites in bureaucratic G
 - **Translate** — swaps German↔English in place, preserving the page's markup, using Chrome's on-device Translator API (or Ollama). Translations are cached per paragraph by text hash, so they survive revisits.
 - **Explain** — plain-language explanation of what a clause actually means for you, using Ollama (or, opt-in, Gemini — see Privacy). Because it lives inside Research Trail, "explain this" knows your current workspace's goal and the pages you've already read on this trail.
 - **Glossary & ask-the-page** — collect recurring bureaucratic terms, or chat with the current page from the side panel.
+- **Hide translations** — saved translations re-apply automatically on revisit, which can trip up script-heavy pages. *Hide translations* (popup or side panel) puts the page back to German and stops re-applying them there, while keeping the hover toolbar; the cache is kept, so *Show translations* is instant. If the page's own scripts are still confused, *Reload page* gives them a clean start — the setting sticks. *Amtshelfer: off* switches the whole module off for the page instead.
 
 It's wired into the trail rather than standalone on purpose: the workspace name *is* the goal, and the journey *is* the context.
 

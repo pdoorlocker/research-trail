@@ -60,6 +60,7 @@
   let currentBlock = null;
   let hideTimer = null;
   let saveChain = Promise.resolve();
+  let translationsHidden = false; // per-page "Hide translations" (see setTranslationsHidden)
   const originalHtml = new Map(); // element -> original innerHTML (for DE view)
 
   // ---------- utils ----------
@@ -149,8 +150,9 @@
   // ---------- storage ----------
 
   async function loadState() {
-    const data = await chrome.storage.local.get(['pages', 'glossary', 'settings']);
+    const data = await chrome.storage.local.get(['pages', 'glossary', 'settings', 'hideTranslations']);
     pageStore = data.pages?.[pageKey] || {};
+    translationsHidden = !!data.hideTranslations?.[pageKey];
     glossary = data.glossary || {};
     settings = { ...settings, ...(data.settings || {}) };
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -359,7 +361,7 @@
     el.dataset.ahHash = hash;
     const saved = pageStore[hash];
     if (saved?.read) el.classList.add('ah-read');
-    if (saved?.en) applyEnglish(el, saved);
+    if (saved?.en && !translationsHidden) applyEnglish(el, saved);
     if (saved?.explain) el.classList.add('ah-explained');
   }
 
@@ -568,6 +570,13 @@
       return;
     }
     const hash = el.dataset.ahHash;
+    // Cached but not showing (translations hidden on this page): no need to
+    // ask the translator again.
+    if (pageStore[hash]?.en) {
+      applyEnglish(el, pageStore[hash]);
+      updateToolbar(el);
+      return;
+    }
     const de = blockText(el);
     try {
       el.classList.add('ah-busy');
@@ -1434,9 +1443,20 @@
     if (pageTranslating) return;
     pageTranslating = true;
     try {
-      const { blocks, hidden } = untranslatedVisibleIn(root || document, root);
+      const found = untranslatedVisibleIn(root || document, root);
+      const hidden = found.hidden;
+      // Blocks with a cached translation (hidden on this page) just re-apply.
+      const blocks = found.blocks.filter(el => {
+        const saved = pageStore[el.dataset.ahHash];
+        if (!saved?.en) return true;
+        applyEnglish(el, saved);
+        return false;
+      });
+      const reapplied = found.blocks.length - blocks.length;
       if (!blocks.length) {
-        toast(hidden
+        toast(reapplied
+          ? `Showing ${reapplied} saved translation${reapplied > 1 ? 's' : ''}.`
+          : hidden
           ? `Nothing visible left to translate (${hidden} blocks are in hidden menus/dialogs — they translate on hover when shown).`
           : root ? 'Nothing left to translate in that section.' : 'Nothing left to translate on this page.');
         if (!root) followPageTranslate = true;
@@ -1461,6 +1481,7 @@
   async function translateBlocksChrome(blocks, hiddenNote = '') {
     let done = 0;
     for (const el of blocks) {
+      if (translationsHidden) return false; // hidden mid-pass: stop here
       try {
         const de = blockText(el);
         const patch = await translateElement(el);
@@ -1505,6 +1526,7 @@
 
     let done = 0;
     for (let ci = 0; ci < chunks.length; ci++) {
+      if (translationsHidden) return false; // hidden mid-pass: skip the rest
       const chunk = chunks[ci];
       const pass = chunks.length > 1 ? ` (pass ${ci + 1}/${chunks.length})` : '';
       const stop = startSpinner(`Translating with Ollama… ${done}/${jobs.length}${pass}`);
@@ -1518,7 +1540,7 @@
           const entry = chunk[n - 1];
           if (!entry || !en) return;
           const { job, i } = entry;
-          if (!job.el.isConnected) return;
+          if (!job.el.isConnected || translationsHidden) return;
           job.units[i].apply(en);
           job.ens[i] = en;
           if (++job.applied < job.units.length) return;
@@ -1885,9 +1907,54 @@
     if (!value && !active && await pageIsGerman() === true) await activate();
   }
 
+  // Saved translations re-apply the moment a block registers, by rewriting
+  // its markup — on script-heavy pages that can orphan the page's own event
+  // listeners or confuse a framework that owns the DOM. Hiding puts every
+  // block back to German and stops the auto-apply for this page (it sticks
+  // across reloads); the hover toolbar stays, and the cache is kept so
+  // showing them again is instant. Restoring markup in place can't revive
+  // listeners the swap already killed, so the popup offers a reload too.
+  function revertToGerman(el) {
+    if (el.classList.contains('ah-showing-en') && originalHtml.has(el)) {
+      el.innerHTML = originalHtml.get(el);
+    }
+    // Recapture on the next apply — the page may change the German meanwhile.
+    originalHtml.delete(el);
+    el._ahChip?.remove();
+    el.classList.remove('ah-translated', 'ah-showing-en');
+    underlineGlossaryTerms(el);
+  }
+
+  async function setTranslationsHidden(value) {
+    const { hideTranslations = {} } = await chrome.storage.local.get('hideTranslations');
+    if (value) hideTranslations[pageKey] = true;
+    else delete hideTranslations[pageKey];
+    await chrome.storage.local.set({ hideTranslations });
+    translationsHidden = value;
+    if (value) {
+      followPageTranslate = false;
+      document.querySelectorAll('[data-ah-hash].ah-translated').forEach(revertToGerman);
+    } else {
+      for (const el of document.querySelectorAll('[data-ah-hash]:not(.ah-translated)')) {
+        const saved = pageStore[el.dataset.ahHash];
+        if (saved?.en) applyEnglish(el, saved);
+      }
+    }
+    if (currentBlock) updateToolbar(currentBlock);
+  }
+
+  function statusReply() {
+    return {
+      ok: true,
+      active,
+      hidden: translationsHidden,
+      translated: active ? document.querySelectorAll('[data-ah-hash].ah-translated').length : 0
+    };
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === 'status') {
-      sendResponse({ ok: true, active });
+      sendResponse(statusReply());
       return;
     }
     if (msg?.type === 'setOverride') {
@@ -1900,7 +1967,18 @@
       sendResponse({ ok: false, inactive: true });
       return;
     }
-    if (msg?.type === 'pageTranslate') { translateWholePage(); sendResponse({ ok: true }); }
+    if (msg?.type === 'setTranslationsHidden') {
+      setTranslationsHidden(!!msg.value).then(
+        () => sendResponse(statusReply()),
+        e => sendResponse({ ok: false, error: String(e?.message || e) }));
+      return true;
+    }
+    // Asking for the whole page in English is an explicit "show translations".
+    if (msg?.type === 'pageTranslate') {
+      (translationsHidden ? setTranslationsHidden(false) : Promise.resolve())
+        .then(() => translateWholePage());
+      sendResponse({ ok: true });
+    }
     if (msg?.type === 'pageGists') { toggleGists(); sendResponse({ ok: true }); }
     if (msg?.type === 'pageAsk' && msg.q) { askPage(msg.q); sendResponse({ ok: true }); }
   });

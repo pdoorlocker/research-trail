@@ -1,3 +1,4 @@
+import { captureEvidence } from './evidence/capture-background.js';
 // Research Trail — background service worker.
 //
 // Responsibilities:
@@ -54,6 +55,8 @@ async function refreshBadge() {
 
 function setupContextMenu() {
   chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'save-evidence', title: 'Add passage to evidence board', contexts: ['selection'] });
+    chrome.contextMenus.create({ id: 'capture-evidence', title: 'Capture screenshot as evidence', contexts: ['page', 'selection'] });
     chrome.contextMenus.create({
       id: 'save-highlight',
       title: 'Save highlight to Research Trail',
@@ -814,6 +817,16 @@ async function downscaleThumb(dataUrl, width) {
 // ---------- Highlights ----------
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (['save-evidence', 'capture-evidence'].includes(info.menuItemId)) {
+    const journeyId = await ensureActiveWorkspace();
+    const params = new URLSearchParams({ j: journeyId, inbox: '1' });
+    try {
+      await captureEvidence(tab, info, journeyId, info.menuItemId === 'capture-evidence');
+      notifyTrailUpdated(journeyId);
+    } catch (error) { params.set('captureError', error.message); }
+    await chrome.tabs.create({ url: chrome.runtime.getURL('evidence/index.html?' + params) });
+    return;
+  }
   if (info.menuItemId !== 'save-highlight' || !info.selectionText || !tab?.url) return;
   const { activeJourneyId } = await getActive();
   if (!activeJourneyId) return;
@@ -837,6 +850,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleMessage(msg, sender) {
   switch (msg.type) {
+    case 'capture-evidence-from-panel': {
+      const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
+      const journeyId = msg.journeyId || await ensureActiveWorkspace();
+      const capture = await captureEvidence(tab, {}, journeyId, !!msg.screenshot);
+      notifyTrailUpdated(journeyId);
+      return {id:capture.id};
+    }
+
     case 'page-captured':
       return onPageCaptured(msg.payload, sender);
 
@@ -1075,6 +1096,8 @@ async function handleMessage(msg, sender) {
       await db.deleteWhere('edges', 'byJourney', msg.journeyId);
       await db.deleteWhere('jobs', 'byJourney', msg.journeyId);
       await db.deleteWhere('topics', 'byJourney', msg.journeyId);
+      await db.deleteWhere('evidenceBoards', 'byJourney', msg.journeyId);
+      await db.deleteWhere('evidenceCaptures', 'byJourney', msg.journeyId);
       await db.remove('journeys', msg.journeyId);
       const { activeJourneyId } = await getActive();
       if (activeJourneyId === msg.journeyId) {

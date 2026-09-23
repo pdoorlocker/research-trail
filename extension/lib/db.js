@@ -14,7 +14,7 @@
 //               payload, status: 'pending'|'error', attempts, lastError, createdAt }
 
 const DB_NAME = 'research-trail';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -45,8 +45,20 @@ function openDb() {
         const topics = db.createObjectStore('topics', { keyPath: 'id' });
         topics.createIndex('byJourney', 'journeyId');
       }
+      if (evt.oldVersion < 3) {
+        // Authored arguments and immutable source snapshots are independent
+        // of live page records. Deleting a page never deletes cited evidence.
+        for (const name of ['evidenceBoards', 'evidenceCaptures']) {
+          const store = db.createObjectStore(name, { keyPath: 'id' });
+          store.createIndex('byJourney', 'journeyId');
+        }
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      req.result.onversionchange = () => { req.result.close(); dbPromise = null; };
+      resolve(req.result);
+    };
+    req.onblocked = () => console.warn('Close older Research Trail pages to finish the database upgrade.');
     req.onerror = () => reject(req.error);
   });
   return dbPromise;

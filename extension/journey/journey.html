@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <title>Research Trail</title>
   <link rel="stylesheet" href="journey.css">
+  <link rel="stylesheet" href="../shared/theme.css">
 </head>
 <body>
   <header id="topbar">
-    <span class="logo">Research Trail</span>
+    <span class="logo">The Things We Learned</span>
     <select id="journey-select" title="Switch workspace"></select>
     <span id="status-chip" class="chip"></span>
     <div class="menu-wrap" id="search-wrap">
@@ -44,7 +45,9 @@
   </div>
 
   <nav id="tabs">
-    <button class="tab active" data-tab="graph">Graph</button>
+    <button class="tab active" data-tab="graph">Browsing trail</button>
+    <button id="evidence-board-btn" class="tab">Evidence board</button>
+    <button id="evidence-walk-btn" class="tab">Walkthrough</button>
     <button class="tab" data-tab="timeline">Timeline</button>
     <button class="tab" data-tab="ask" title="Ask questions about everything you've collected in this workspace">Ask</button>
     <button id="topics-back" hidden>← All topics</button>

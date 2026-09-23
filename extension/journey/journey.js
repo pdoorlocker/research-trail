@@ -52,6 +52,12 @@ function isScratchJourney(j) {
 // ---------- Bootstrap ----------
 
 async function init() {
+  $('evidence-board-btn').onclick = () => {
+    if(journey) location.href = '../evidence/index.html?' + new URLSearchParams({j:journey.id});
+  };
+  $('evidence-walk-btn').onclick = () => {
+    if(journey) location.href = '../evidence/index.html?' + new URLSearchParams({j:journey.id,walk:'1'});
+  };
   wireTopbar();
   wireDrawer();
   wireSettings();
@@ -635,7 +641,7 @@ function wireTopbar() {
   });
   $('e-close').onclick = () => $('edge-modal').close();
 
-  for (const tab of document.querySelectorAll('.tab')) {
+  for (const tab of document.querySelectorAll('.tab[data-tab]')) {
     tab.onclick = () => activateTab(tab.dataset.tab);
   }
 
@@ -722,7 +728,7 @@ function wireTopbar() {
 }
 
 function activateTab(name) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   $('graph-view').style.display = name === 'graph' ? '' : 'none';
   $('timeline-view').hidden = name !== 'timeline';
   $('ask-view').hidden = name !== 'ask';
@@ -2305,11 +2311,13 @@ function slug(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'journey';
 }
 
-function exportJourney(kind) {
+async function exportJourney(kind) {
   if (!journey) return;
   if (kind === 'json') {
     const data = {
       journey,
+      evidenceBoards: await db.getByIndex('evidenceBoards', 'byJourney', journey.id),
+      evidenceCaptures: await db.getByIndex('evidenceCaptures', 'byJourney', journey.id),
       nodes: nodes.map(({ embedding, text, thumb, ...rest }) => rest),
       edges,
       exportedAt: new Date().toISOString(),

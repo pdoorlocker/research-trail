@@ -35,6 +35,10 @@ async function render() {
     window.close();
   };
   $('open-map-btn').onclick = () => openMap(journey?.id);
+  $('open-evidence-btn').onclick = () => {
+    chrome.tabs.create({url:chrome.runtime.getURL('evidence/index.html?' + new URLSearchParams(journey ? {j:journey.id} : {}))});
+    window.close();
+  };
 
   $('ws-create').onclick = createWorkspace;
   $('ws-name').onkeydown = (e) => {
@@ -146,7 +150,30 @@ async function renderAmtshelfer() {
     await ahSend({ type: 'setOverride', value: status.active ? 'off' : 'on' });
     renderAmtshelfer();
   };
+
+  // Hide/show translations without switching Amtshelfer off: only offered
+  // once there's something to hide (or it's already hidden).
+  const hideRow = $('ah-hide-row');
+  const hide = $('ah-hide-btn');
+  hideRow.hidden = !status.active || !(status.translated || status.hidden);
+  hide.textContent = status.hidden ? 'Show translations' : 'Hide translations';
+  hide.title = status.hidden
+    ? 'Put saved English translations back on this page'
+    : 'Show the original German on this page and stop re-applying saved translations here (the toolbar stays)';
+  hide.onclick = async () => {
+    const res = await ahSend({ type: 'setTranslationsHidden', value: !status.hidden });
+    // Swapping the German back in can't revive page scripts the translation
+    // already broke — a reload can, and the page stays untranslated.
+    $('ah-reload-btn').hidden = !(res?.hidden && status.translated);
+    renderAmtshelfer();
+  };
 }
+
+$('ah-reload-btn').onclick = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) chrome.tabs.reload(tab.id);
+  window.close();
+};
 
 $('ah-translate-btn').onclick = async () => {
   await ahSend({ type: 'pageTranslate' });

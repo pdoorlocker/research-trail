@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <title>Research Trail</title>
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="../shared/theme.css">
 </head>
 <body>
   <header>
     <select id="ws-select" title="Workspace"></select>
     <button id="pause-btn" class="icon" title="Pause page capture (nothing gets recorded until you resume)"></button>
     <button id="ask-btn" class="icon" title="Ask questions about everything in this workspace">Ask</button>
+    <button id="evidence-btn" class="icon">Evidence</button>
     <button id="map-btn" class="icon" title="Open the full map">Map</button>
     <button id="close-btn" class="icon" title="Close panel">Close</button>
   </header>
@@ -43,6 +45,7 @@
     <p class="hint">Closes every captured tab except this one. Nothing is lost — the pages stay on the map, one click to reopen.</p>
   </div>
 
+  <details id="argument-outline" open><summary>Curated argument</summary><select id="outline-board" aria-label="Argument"></select><ol id="outline-list"></ol><p id="outline-status"></p><div class="outline-actions"><button id="outline-present">Walk through</button><button id="outline-capture">Capture passage</button><button id="outline-screenshot">Capture screenshot</button></div></details>
   <div id="amtshelfer-card"></div>
 
   <script src="../vendor/cytoscape.min.js"></script>
@@ -50,5 +53,6 @@
   <script src="../vendor/cose-base.js"></script>
   <script src="../vendor/cytoscape-fcose.js"></script>
   <script type="module" src="panel.js"></script>
+  <script type="module" src="../evidence/outline.js"></script>
 </body>
 </html>

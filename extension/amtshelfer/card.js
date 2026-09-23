@@ -42,8 +42,20 @@ export function mountAmtshelferCard(container) {
   // --- per-page status + toggle ---
   const statusRow = el('div', 'ah-card-row');
   const toggleBtn = el('button', 'ah-card-btn', '…');
+  const hideBtn = el('button', 'ah-card-btn', '');
+  hideBtn.hidden = true;
+  const reloadBtn = el('button', 'ah-card-btn', 'Reload page');
+  reloadBtn.title = "Reload so the page's own scripts start fresh — translations stay hidden";
+  reloadBtn.hidden = true;
+  reloadBtn.onclick = async () => {
+    const tab = await activeTab();
+    if (tab?.id) chrome.tabs.reload(tab.id);
+    reloadBtn.hidden = true;
+  };
   statusRow.append(toggleBtn);
-  container.append(statusRow);
+  const hideRow = el('div', 'ah-card-row');
+  hideRow.append(hideBtn, reloadBtn);
+  container.append(statusRow, hideRow);
 
   // Action feedback — a silent no-op reads as "broken", so every page
   // action reports what actually happened.
@@ -69,11 +81,26 @@ export function mountAmtshelferCard(container) {
     const status = await sendToPage({ type: 'status' });
     if (!status) {
       statusText.textContent = 'n/a on this page';
-      toggleBtn.hidden = true;
+      toggleBtn.hidden = hideBtn.hidden = reloadBtn.hidden = true;
       return;
     }
     toggleBtn.hidden = false;
-    statusText.textContent = status.active ? 'on' : 'off';
+    statusText.textContent = !status.active ? 'off' : status.hidden ? 'on · translations hidden' : 'on';
+    // Hide/show translations without switching Amtshelfer off.
+    hideBtn.hidden = !status.active || !(status.translated || status.hidden);
+    hideBtn.textContent = status.hidden ? 'Show translations' : 'Hide translations';
+    hideBtn.title = status.hidden
+      ? 'Put saved English translations back on this page'
+      : 'Show the original German on this page and stop re-applying saved translations here (the toolbar stays)';
+    hideBtn.onclick = async () => {
+      const res = await sendToPage({ type: 'setTranslationsHidden', value: !status.hidden });
+      if (res === null) flash('Lost contact with the page — reload the tab and try again.');
+      // Swapping the German back in can't revive page scripts the translation
+      // already broke — a reload can, and the page stays untranslated.
+      reloadBtn.hidden = !(res?.hidden && status.translated);
+      renderStatus();
+    };
+    if (!status.hidden) reloadBtn.hidden = true;
     toggleBtn.textContent = status.active ? 'Disable on this page' : 'Enable on this page';
     toggleBtn.onclick = async () => {
       const res = await sendToPage({ type: 'setOverride', value: status.active ? 'off' : 'on' });
