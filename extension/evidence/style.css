@@ -271,3 +271,9 @@ body.space-pan #viewport{cursor:grab!important}
 /* Evidence status label and unverified passages */
 .view-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;border:1px dashed var(--muted);font:10.5px var(--mono);letter-spacing:.03em;color:var(--muted);cursor:help;white-space:nowrap}
 .excerpt.is-unverified mark{background:transparent;color:var(--ink);text-decoration:underline dotted var(--muted);text-underline-offset:4px}
+/* Evidence cards round their own header/footer instead of clipping, so the
+   connect handle (which sits half outside the card) isn't cut off. */
+.card.evidence{overflow:visible}
+.card.evidence > .source-head:first-child{border-top-left-radius:7px;border-top-right-radius:7px}
+.card.evidence > .source-footer:last-child{border-bottom-left-radius:7px;border-bottom-right-radius:7px}
+.card.evidence .crop{border-radius:4px;overflow:hidden}
