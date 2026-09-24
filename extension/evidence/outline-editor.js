@@ -133,12 +133,17 @@ export function init(api) {
 
   // ---------- Edits (each one is a single undo step) ----------
 
-  function change(fn, nextFocus) {
+  function change(fn, nextFocus, { reorder = false } = {}) {
     flushText();
     const t = tree();
     if (fn(t) === false) return;
     // A thought that something now backs up is being argued: a claim.
     for (const n of api.board.nodes) if (n.type === 'note' && api.supportersOf(n.id).length) applyType(n, 'claim');
+    // The walkthrough reads in the outline's order.
+    if (reorder) {
+      const order = displayRows(tree()).map(r => r.n).filter(n => !['note', 'evidence'].includes(n.type)).map(n => n.id);
+      api.board.steps = [...order, ...api.board.steps.filter(id => !order.includes(id) && api.get(id))];
+    }
     if (nextFocus !== undefined) focus = nextFocus;
     needsLayout = true;
     layout(false);
@@ -335,7 +340,7 @@ export function init(api) {
         : n.type === 'evidence' && !n.url ? 'add where this is from' : '';
       const extras = b.links.filter(l => l.from === n.id && t.primary.get(l.to) !== l && api.get(l.to));
       const choices = from ? api.WORD_CHOICES.filter(([v]) => api.allowedWords(from.type, n.type).includes(v)) : [];
-      return `<li class="ol-item" data-id="${esc(n.id)}" style="--indent:${indent}">
+      return `<li class="ol-item" data-id="${esc(n.id)}" data-from="${esc(parent || '')}" data-joined-by="${esc(word || '')}" style="--indent:${indent}">
         <div class="ol-row" data-row="${esc(n.id)}">
           <span class="ol-grip" draggable="true" data-grip="${esc(n.id)}" title="Drag onto another line to make it a reason for that line">⠿</span>
           <select class="ol-type type-${esc(n.type)}" data-type="${esc(n.id)}" aria-label="Kind of line">${TYPES.map(([v, l]) => `<option value="${v}" ${v === n.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -343,7 +348,7 @@ export function init(api) {
           <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : 'Type a thought…'}">${esc(textOf(n))}</div>
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
-          ${n.type === 'conclusion' ? (main?.id === n.id ? '<span class="ol-answer">answers the question</span>' : api.isInterim(n) ? '<span class="ol-source">interim</span>' : '') : ''}
+          ${n.type === 'conclusion' ? (main?.id === n.id ? '<span class="ol-answer">answers the question</span>' : `${api.isInterim(n) ? '<span class="ol-source">interim</span>' : ''}<button class="ol-make-answer" data-answer="${esc(n.id)}" title="Make this the conclusion that answers the question">★ make this the answer</button>`) : ''}
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
         ${extras.map(l => `<button class="ol-also" data-goto="${esc(l.to)}" data-link="${esc(l.id)}">↳ also, ${esc(api.wordLabel(l.word, api.get(l.to).type))}: ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o), 60)) + '”' : esc(clip(o.text, 60)))(api.get(l.to))}</button>`).join('')}
@@ -373,17 +378,42 @@ export function init(api) {
     const wrap = view.querySelector('.ol-tree-wrap'), svg = wrap?.querySelector('.ol-arrows');
     if (!svg) return;
     const box = wrap.getBoundingClientRect();
-    let lane = 0;
-    const paths = [...wrap.querySelectorAll('.ol-also')].map(ref => {
-      const target = wrap.querySelector(`[data-row="${CSS.escape(ref.dataset.goto)}"] .ol-text`);
-      if (!target) return '';
-      const ra = ref.getBoundingClientRect(), rt = target.getBoundingClientRect();
-      const x1 = ra.left - box.left - 4, y1 = ra.top - box.top + ra.height / 2;
-      const x2 = rt.left - box.left - 6, y2 = rt.top - box.top + Math.min(12, rt.height / 2);
-      const out = -10 - (lane++ % 3) * 7;
-      return `<path class="k-${esc(api.board.links.find(l => l.id === ref.dataset.link)?.word || '')}" data-arrow="${esc(ref.dataset.link)}" d="M${x1},${y1} C${out},${y1} ${out},${y2} ${x2},${y2}" marker-end="url(#ol-head)"/>`;
+    // The line of reasoning: from each line's chip to the chip of the line
+    // that follows from it, straight down for a chain, bending into details.
+    const chip = id => wrap.querySelector(`.ol-item[data-id="${CSS.escape(id)}"] > .ol-row .ol-type`)?.getBoundingClientRect();
+    const spine = [...wrap.querySelectorAll('.ol-item[data-from]:not([data-from=""])')].map(li => {
+      const a = chip(li.dataset.from), c = chip(li.dataset.id);
+      if (!a || !c) return '';
+      const x1 = a.left - box.left + a.width / 2, y1 = a.bottom - box.top + 2, cy = c.top - box.top + c.height / 2;
+      const d = Math.abs(c.left - a.left) < 4 ? `M${x1},${y1} V${c.top - box.top - 3}` : `M${x1},${y1} V${cy} H${c.left - box.left - 3}`;
+      return `<path class="ol-spine k-${esc(li.dataset.joinedBy)}" d="${d}" marker-end="url(#ol-head)"/>`;
     }).join('');
-    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${paths}`;
+    // "Also" links: out into the left margin, down, and into the target
+    // row's type label. Links that overlap vertically get separate lanes,
+    // shorter ones closest to the text, so they run side by side instead of
+    // crossing.
+    const segs = [...wrap.querySelectorAll('.ol-also')].map(ref => {
+      const target = wrap.querySelector(`.ol-item[data-id="${CSS.escape(ref.dataset.goto)}"] > .ol-row .ol-type`);
+      if (!target) return null;
+      const ra = ref.getBoundingClientRect(), rt = target.getBoundingClientRect();
+      return { ref, x1: ra.left - box.left - 3, y1: ra.top - box.top + ra.height / 2, x2: rt.left - box.left - 3, y2: rt.top - box.top + rt.height / 2 };
+    }).filter(Boolean).sort((a, c) => Math.abs(a.y2 - a.y1) - Math.abs(c.y2 - c.y1));
+    const lanes = [];
+    for (const g of segs) {
+      const lo = Math.min(g.y1, g.y2) - 6, hi = Math.max(g.y1, g.y2) + 6;
+      let k = 0;
+      while ((lanes[k] || []).some(([a, c]) => lo < c && hi > a)) k++;
+      (lanes[k] = lanes[k] || []).push([lo, hi]);
+      g.lane = k;
+    }
+    const r = 5;
+    const paths = segs.map(g => {
+      const lx = -10 - g.lane * 9, down = g.y2 > g.y1 ? 1 : -1;
+      const d = `M${g.x1},${g.y1} H${lx + r} Q${lx},${g.y1} ${lx},${g.y1 + down * r} V${g.y2 - down * r} Q${lx},${g.y2} ${lx + r},${g.y2} H${g.x2}`;
+      const word = api.board.links.find(l => l.id === g.ref.dataset.link)?.word || '';
+      return `<path class="ol-also-line k-${esc(word)}" data-arrow="${esc(g.ref.dataset.link)}" d="${d}" marker-end="url(#ol-head)"/>`;
+    }).join('');
+    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${spine}${paths}`;
   }
   new ResizeObserver(() => { if (api.tab === 'outline') drawArrows(); }).observe(view);
   view.addEventListener('mouseover', e => {
@@ -458,10 +488,7 @@ export function init(api) {
         lastAt.set(it.depth, { node: n, parent });
         for (const d of [...lastAt.keys()]) if (d > it.depth) lastAt.delete(d);
       }
-      // Imported notes read in the order you wrote them.
-      const order = displayRows(tree()).map(r => r.n).filter(n => !['note', 'evidence'].includes(n.type)).map(n => n.id);
-      b.steps = [...order, ...b.steps.filter(id => !order.includes(id))];
-    }, null);
+    }, null, { reorder: true });
     api.notify(`Imported ${items.length} lines. Change any word by clicking it.`);
   }
 
@@ -599,10 +626,7 @@ export function init(api) {
 
   // The walkthrough reads the argument in the outline's order.
   function orderFromOutline() {
-    change(t => {
-      const out = displayRows(t).map(r => r.n).filter(n => !['note', 'evidence'].includes(n.type)).map(n => n.id);
-      api.board.steps = [...out, ...api.board.steps.filter(id => !out.includes(id) && api.get(id))];
-    }, null);
+    change(() => {}, null, { reorder: true });
     api.notify('Walkthrough now follows the outline. Undo restores the previous order.');
   }
 
