@@ -168,6 +168,29 @@ export async function chatStream(messages, { temperature = 0.3, numCtx, onDelta,
   return { ok: true, text: out, backend: `Ollama · ${chat}` };
 }
 
+// One non-streaming chat turn with tool definitions (Ollama's native tool
+// calling). Returns the assistant message, whose tool_calls the caller runs.
+export async function chatTools(messages, tools, { temperature = 0.2, numCtx = 8192, signal } = {}) {
+  const { ollamaUrl } = await getSettings();
+  const { chat } = await resolveModels();
+  let res;
+  try {
+    res = await fetch(`${ollamaUrl.replace(/\/+$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: chat, messages, tools, stream: false, think: false, options: { temperature, num_ctx: numCtx } }),
+      signal,
+    });
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    throw new Error(`Could not reach Ollama at ${ollamaUrl}. Is it running?`);
+  }
+  if (res.status === 403) throw new Error('Ollama rejected the request (403 — CORS). ' + CORS_HINT);
+  if (!res.ok) throw new Error(`Ollama error ${res.status}: ${truncate(await res.text().catch(() => ''), 200)}`);
+  const data = await res.json();
+  return { message: data.message || { role: 'assistant', content: '' }, model: chat };
+}
+
 export async function embed(text) {
   const { ollamaUrl } = await getSettings();
   const { embed: embedModel } = await resolveModels();

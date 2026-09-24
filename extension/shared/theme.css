@@ -39,3 +39,14 @@ input[type=text],input[type=url],textarea{background:var(--card)}.pill.primary{b
 #argument-outline{padding:14px;border-top:1px solid var(--border);background:var(--card)}#argument-outline summary{font:500 15px var(--serif);cursor:pointer}#argument-outline select{width:100%;margin:12px 0;padding:7px;border:1px solid var(--border);border-radius:5px}#outline-list{list-style:decimal-leading-zero;padding-left:28px;margin:10px 0}#outline-list li{font-size:13px;margin:9px 0}#outline-list button{font-size:13px;text-align:left;white-space:normal;background:transparent;border:0;padding:0}#outline-status{font-size:12px;color:var(--muted)}.outline-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 @media(max-width:760px){.workspace-nav{gap:9px}.workspace-nav label{margin-left:0}#board-picker{max-width:200px}#topbar{padding:10px}}
 @media print{:root{color-scheme:light;--bg:white;--fg:black}}
+
+.jot-form{display:flex;gap:6px;margin:10px 0 4px}.jot-form input{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--border);border-radius:5px;font:14px var(--serif)}
+
+/* One field style for every page. :where() keeps it at zero specificity so a
+   page's own field rules still win; this only fills in unstyled fields. */
+:where(input:not([type]),input[type=text],input[type=url],input[type=search],input[type=email],input[type=date],input[type=number],textarea,select){
+  box-sizing:border-box;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font:14px/1.4 var(--sans);transition:border-color .15s,box-shadow .15s}
+:where(input:not([type]),input[type=text],input[type=url],input[type=search],input[type=email],input[type=date],input[type=number],textarea,select):hover{border-color:var(--muted)}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none;border-color:var(--accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%,transparent)}
+input::placeholder,textarea::placeholder{color:var(--muted);opacity:.75}
+input[type=date]{color-scheme:light dark}

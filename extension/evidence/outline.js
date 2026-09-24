@@ -1,4 +1,5 @@
 import * as db from '../lib/db.js';
+import { saveJot } from './workspace.js';
 const $=id=>document.getElementById(id);
 let records=[], journeyId=null, loading=0;
 function openBoard(walk=false){
@@ -40,3 +41,17 @@ for(const [id,screenshot] of [['outline-capture',false],['outline-screenshot',tr
 $('ws-select').addEventListener('change',refresh);
 chrome.runtime.onMessage.addListener(msg=>{if(msg.type==='trail-updated')refresh();});
 refresh();setInterval(refresh,10000);
+
+// Jot a thought without leaving the page. It goes to the workspace inbox,
+// with the page it was written on as context, and shows up in the board's
+// outline ready to be added.
+$('jot-form').onsubmit=async e=>{
+  e.preventDefault();const text=$('jot-input').value.trim();if(!text)return;
+  try{
+    if(!journeyId)throw new Error('Choose a workspace first.');
+    const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+    await saveJot(journeyId,text,{url:tab?.url,title:tab?.title});
+    $('jot-input').value='';$('outline-status').textContent='Saved. It will be in the board’s Outline, ready to add.';
+    chrome.runtime.sendMessage({type:'jot-saved',journeyId}).catch(()=>{});
+  }catch(error){$('outline-status').textContent=error.message;}
+};

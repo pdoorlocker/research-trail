@@ -22,11 +22,11 @@ export async function captureEvidence(tab, info, journeyId, screenshot = false) 
   const capture = {
     id: crypto.randomUUID(), journeyId, pageId: page?.id || '',
     url, frameUrl: url, title: source?.title || tab.title || url,
-    quote: exact, capturedAt: Date.now(), view: source?.view || 'legacy-unverified',
+    quote: exact, capturedAt: Date.now(), view: source && (!exact || source.quote === exact) ? source.view : 'legacy-unverified',
     anchor: source?.quote === exact ? source.anchor : { exact, prefix: '', suffix: '' },
     note: source?.view === 'translated'
       ? 'Captured from a translated page view. Switch to the original wording before creating a source-language passage link.'
-      : !source ? 'Page access was restricted; original wording and page anchor were not verified.' : '',
+      : !source || (exact && source.quote !== exact) ? 'The original selection could not be revalidated; original wording and page anchor were not verified.' : '',
   };
   if (screenshot) {
     const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });

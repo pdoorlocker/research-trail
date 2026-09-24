@@ -68,6 +68,17 @@ The reason this tool exists: reading Austrian government sites in bureaucratic G
 
 It's wired into the trail rather than standalone on purpose: the workspace name *is* the goal, and the journey *is* the context.
 
+## Evidence boards
+
+A workspace can hold one or more **evidence boards**: an argument that answers one question, where every step is pinned to the exact words of a source. Facts (your situation) lead to claims (what the rules say), each backed by evidence (a quoted passage with a link that opens the page highlighted at it, optionally a cropped screenshot), toward a conclusion and any open questions. Contradicting evidence stays on the board as a *challenge*.
+
+- **Jot**: the **Outline** tab is the quickest way in. Type thoughts one per line without deciding what they are yet, then shape them: *Tab* puts a line under the one above as a reason for it, *Shift+Tab* moves it back out, and dragging a line's handle puts it under any other line. A leading `?` makes a question, `>` a quote, `!` a conclusion, `-` a fact about you, and `~` marks something that pushes back on the line above. A thought that something is filed under becomes a claim. The outline and the spatial board are two views of the same cards: cards you haven't placed by hand arrange themselves in columns (reasons to the left of what they support), and dragging a card on the board keeps it where you put it. The side panel has a jot box too; thoughts saved there wait in the board's outline, with the page you were reading as context.
+- **Collect**: select text → right-click → *Add passage to evidence board*, or *Capture screenshot as evidence*. Captures land in the board's **Evidence inbox**.
+- **Author**: place evidence, write claims, connect cards, and choose the walkthrough order.
+- **Present**: *▶ Walk through* steps through the argument; *Export brief* gives Markdown, print, or a standalone interactive `.html` reader.
+- **Learn it**: *? How this works* explains the cards and lines; *Take the guided tour* adds a worked example board whose walkthrough explains each concept.
+- **Draft with local AI** (optional, Author mode): a local Ollama model proposes claims, open questions, connections and a walkthrough order, and can place inbox passages word for word. It cannot write quotations or add facts about you. Nothing changes until you tick and approve the proposals, and one Undo removes the batch. Works with small models that support tool calling (tested with `gemma4:e4b`), which are reliable for narrow tasks like *Sort my inbox* and weaker at building a whole argument.
+
 ## Privacy guardrails
 
 - Capture is always on by design (it's a tab surface), but pausing is one click from the popup or panel and the toolbar badge shows `❚❚` the whole time you're paused.
@@ -126,3 +137,23 @@ A workspace can hold a hundred pages, and a local model can't read them all, so 
 ## License
 
 MIT — see [LICENSE](LICENSE). Vendored libraries keep their own licenses (Readability.js: Apache-2.0; Cytoscape.js and the fCoSE layout: MIT).
+
+### Evidence integration: storage and verification
+
+After updating the unpacked extension, reload it in `chrome://extensions` and reopen its popup/side panel. If an older Research Trail tab blocks the database upgrade, close that tab and reopen the workspace. Existing journeys, pages, notes and highlights are retained.
+
+Evidence boards and captured passages use separate IndexedDB stores. Removing or revisiting a page does not change evidence already attached to a board. Removing an entire workspace removes its boards and captures too. Multiple arguments can share the same captured passage, with independent card positions, annotations and reading orders. A stale editing tab is prevented from overwriting a newer board revision; export its board file before reloading to reconcile changes.
+
+Legacy highlights and translated-page selections remain usable evidence, but are labeled as unverified original wording. Their source links open the page without claiming to highlight an original-language quotation. Paste verified original wording into the exact-passage field when you have checked it. Capture dates are retained separately from the author-supplied date checked.
+
+Editable board files retain original screenshots. Standalone readers embed visible screenshot crops and annotations, while omitting the original uncropped image and internal capture identifiers. Reader HTML contains its runtime and theme and requires no extension; following external source links still requires the web. Passage links depend on browser support and unchanged source text.
+
+Developer checks (no AI requests):
+
+```sh
+node tests/evidence-export.mjs
+node --check extension/evidence/app.js
+python3 -m http.server 4186 --bind 127.0.0.1
+```
+
+Use a dedicated test origin and open `http://127.0.0.1:4186/tests/evidence.html`. It checks database migration, save conflicts, snapshot retention, legacy/translated evidence, text-selection anchors, and capture rejection paths. Screenshot/browser API rejection cases use controlled Chrome API stubs; the real IndexedDB and DOM selection APIs are exercised. The export check creates an ignored `tests/evidence-reader.generated.html` for browser inspection. These checks do not reload or modify your installed extension.

@@ -22,6 +22,7 @@ function openDb() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
     req.onupgradeneeded = (evt) => {
       const db = req.result;
       if (evt.oldVersion < 1) {
@@ -55,11 +56,16 @@ function openDb() {
       }
     };
     req.onsuccess = () => {
+      if (blocked) { req.result.close(); return; }
       req.result.onversionchange = () => { req.result.close(); dbPromise = null; };
       resolve(req.result);
     };
-    req.onblocked = () => console.warn('Close older Research Trail pages to finish the database upgrade.');
-    req.onerror = () => reject(req.error);
+    req.onblocked = () => {
+      blocked = true;
+      dbPromise = null;
+      reject(new Error('Close older Research Trail tabs and side panels, then reload to finish the database upgrade. Your existing data is retained.'));
+    };
+    req.onerror = () => { dbPromise = null; reject(req.error); };
   });
   return dbPromise;
 }

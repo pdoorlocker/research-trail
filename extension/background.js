@@ -850,6 +850,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleMessage(msg, sender) {
   switch (msg.type) {
+    case 'jot-saved':
+      notifyTrailUpdated(msg.journeyId);
+      return { ok: true };
+
     case 'capture-evidence-from-panel': {
       const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
       const journeyId = msg.journeyId || await ensureActiveWorkspace();

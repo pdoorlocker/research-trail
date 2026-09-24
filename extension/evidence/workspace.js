@@ -62,3 +62,22 @@ export function evidenceCard(capture, position) {
     provenance: { view: capture.view || 'original', anchor: capture.anchor || null, frameUrl: capture.frameUrl || capture.url },
   };
 }
+
+// A thought jotted from the side panel. It keeps the page it was written on
+// as context, but it is the author's own words, never a source quotation.
+export function noteCard(capture, position) {
+  return {
+    id: crypto.randomUUID(), type: 'note', text: capture.title || '',
+    x: position.x, y: position.y, sourceCaptureId: capture.id, capturedAt: capture.capturedAt,
+    note: capture.note || '',
+  };
+}
+
+export async function saveJot(journeyId, text, page = {}) {
+  if (!await db.get('journeys', journeyId)) throw new Error('Choose a workspace first.');
+  const url = /^https?:/.test(page.url || '') ? page.url : '';
+  return db.put('evidenceCaptures', {
+    id: crypto.randomUUID(), journeyId, kind: 'note', view: 'jot', title: text.trim().slice(0, 2000), quote: '',
+    url, note: url && page.title ? `Jotted while reading “${page.title}”` : '', capturedAt: Date.now(),
+  });
+}
