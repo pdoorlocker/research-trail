@@ -167,6 +167,9 @@ $('#editor').addEventListener('close',closePick);
 function toggleMulti(id){if(selected&&!multi.size)multi.add(selected);multi.has(id)?multi.delete(id):multi.add(id);selected=multi.size?[...multi].at(-1):null;if(multi.size===1)multi.clear();render()}
 const canvasAt=(cx,cy)=>{const r=$('#canvas').getBoundingClientRect();return {x:(cx-r.left)/zoom,y:(cy-r.top)/zoom}};
 function removeCards(ids){const gone=new Set(ids);board.nodes=board.nodes.filter(n=>!gone.has(n.id));board.links=board.links.filter(l=>!gone.has(l.from)&&!gone.has(l.to));board.steps=board.steps.filter(id=>!gone.has(id));multi.clear();selected=null;persist();render();notify(`${gone.size} card${gone.size===1?'':'s'} removed. Undo brings ${gone.size===1?'it':'them'} back.`)}
+// Shift/⌘-click is also the browser's "extend text selection" gesture; stop
+// it so adding a card doesn't flash-highlight the text between cards.
+$('#viewport').addEventListener('mousedown',e=>{if((e.shiftKey||e.metaKey||e.ctrlKey)&&author&&!readerMode&&e.target.closest('#canvas [data-node]'))e.preventDefault()});
 let dragMoved=false,spaceDown=false;
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!e.target.matches('input,textarea,select,button,[contenteditable]')&&tab==='map'&&!walking){spaceDown=true;document.body.classList.add('space-pan');e.preventDefault()}});
 document.addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;document.body.classList.remove('space-pan')}});

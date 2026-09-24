@@ -249,3 +249,6 @@ select.pick-native{position:absolute!important;opacity:0!important;pointer-event
 body:not(.space-pan) #viewport:has(.card.is-editable){cursor:default}
 body.space-pan #viewport{cursor:grab!important}
 .multi-list{list-style:none;padding:0;margin:10px 0;display:grid;gap:6px;font-size:13px}
+/* In Author mode cards are drag handles, so their text isn't selectable. */
+#canvas .card.is-editable{user-select:none;-webkit-user-select:none}
+#canvas .card.is-editable a{user-select:auto}
