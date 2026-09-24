@@ -62,6 +62,20 @@
   let saveChain = Promise.resolve();
   let translationsHidden = false; // per-page "Hide translations" (see setTranslationsHidden)
   const originalHtml = new Map(); // element -> original innerHTML (for DE view)
+  // Evidence capture runs in this same isolated world: when a passage is
+  // saved from a translated block, it asks for the block's original German
+  // so the evidence quotes the source, not the translation.
+  globalThis.__amtshelferOriginalText = el => {
+    const block = el?.closest?.('[data-ah-hash]');
+    if (!block || !block.classList.contains('ah-showing-en')) return null;
+    const de = pageStore[block.dataset.ahHash]?.de;
+    if (de) return de.replace(/\s+/g, ' ').trim();
+    const html = originalHtml.get(block);
+    if (html == null) return null;
+    const t = document.createElement('template');
+    t.innerHTML = html;
+    return t.content.textContent.replace(/\s+/g, ' ').trim();
+  };
 
   // ---------- utils ----------
 

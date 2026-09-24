@@ -13,6 +13,20 @@ export function collectSelection() {
   const translated = (!quote && !!document.querySelector('.ah-showing-en')) || !!element?.closest('.ah-showing-en') || [...(root?.querySelectorAll('.ah-showing-en') || [])].some(el => {
     try { return range.intersectsNode(el); } catch { return false; }
   });
+  // Saved from a block Amtshelfer translated: quote the original German of
+  // the block(s) instead (the translation isn't aligned word by word, so the
+  // whole paragraph), and keep the English selection as its translation.
+  if (translated && quote && range && typeof globalThis.__amtshelferOriginalText === 'function') {
+    const blocks = [...document.querySelectorAll('.ah-showing-en')].filter(el => { try { return range.intersectsNode(el); } catch { return false; } });
+    const inside = n => blocks.some(b => b.contains(n));
+    if (blocks.length && inside(range.startContainer) && inside(range.endContainer)) {
+      const originals = blocks.map(b => globalThis.__amtshelferOriginalText(b));
+      if (originals.every(Boolean)) {
+        const german = originals.join(' ');
+        return { quote: german, translation: quote, fromTranslation: true, url: location.href, title: document.title, view: 'original', anchor: { exact: german, prefix: '', suffix: '' } };
+      }
+    }
+  }
   let prefix = '', suffix = '';
   if (range && block?.contains(range.startContainer) && block.contains(range.endContainer)) {
     try {

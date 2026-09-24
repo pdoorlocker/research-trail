@@ -40,7 +40,7 @@ export function init(api) {
 
   function itemHTML(c) {
     const note = c.kind === 'note', used = !!onBoard(c);
-    const kind = note ? 'Jotted thought' : c.view === 'translated' ? 'From a translated page' : c.view === 'legacy-unverified' ? 'Wording not verified' : c.view === 'saved-text' ? 'From saved page text' : '';
+    const kind = note ? 'Jotted thought' : c.view === 'translated' ? 'From a translated page' : c.view === 'legacy-unverified' ? 'Wording not verified' : c.view === 'saved-text' ? 'From saved page text' : c.translation ? 'Original German · English kept' : '';
     return `<li class="inbox-card ${used ? 'is-used' : ''} ${c.archived ? 'is-archived' : ''}" draggable="${!c.archived}" data-capture="${esc(c.id)}">
       <p class="inbox-meta">${esc([domain(c.url), kind, used ? 'on board' : '', c.archived ? 'archived' : ''].filter(Boolean).join(' · '))}</p>
       ${note ? `<p class="inbox-thought">${esc(clip(c.title, 220))}</p>` : `<p class="inbox-title">${esc(clip(c.title, 90))}</p>${c.quote ? `<blockquote>${esc(clip(c.quote, 220))}</blockquote>` : ''}`}

@@ -860,7 +860,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await recordOnTrail(capture);
     notifyTrailUpdated(target.journeyId);
     toast = { journeyId: target.journeyId, journeyName: target.journeyName, captureId: capture.id, quote: capture.quote, screenshot,
-      warning: capture.view === 'translated' ? 'Saved from the translated view: switch to the original wording to link to the exact passage.' : capture.view === 'legacy-unverified' ? 'The exact wording couldn’t be checked on this page.' : '',
+      warning: capture.translation ? 'Saved the original German paragraph; your English selection is kept as its translation.' : capture.view === 'translated' ? 'Saved from the translated view: switch to the original wording to link to the exact passage.' : capture.view === 'legacy-unverified' ? 'The exact wording couldn’t be checked on this page.' : '',
       moveTo: target.alternative };
   } catch (error) {
     if (error.cancelled) return;

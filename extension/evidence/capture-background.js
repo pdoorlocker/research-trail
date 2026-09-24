@@ -29,7 +29,9 @@ export async function captureEvidence(tab, info, journeyId, screenshot = false) 
     });
     source = result[0]?.result;
   } catch { /* Restricted pages/PDFs can still use explicit screenshot capture. */ }
-  const exact = info.selectionText?.trim() || source?.quote || '';
+  // From a translated block the page script supplies the original German;
+  // the context-menu selection text is the English translation then.
+  const exact = source?.fromTranslation ? source.quote : info.selectionText?.trim() || source?.quote || '';
   if (!screenshot && !exact) throw new Error('Select a passage on the page first.');
   const url = source?.url || info.frameUrl || tab.url;
   if (!isCapturable(url, settings.blocklist)) throw new Error('This frame is excluded from capture.');
@@ -37,7 +39,7 @@ export async function captureEvidence(tab, info, journeyId, screenshot = false) 
   const capture = {
     id: crypto.randomUUID(), journeyId, pageId: page?.id || '',
     url, frameUrl: url, title: source?.title || tab.title || url,
-    quote: exact, capturedAt: Date.now(), view: source && (!exact || source.quote === exact) ? source.view : 'legacy-unverified',
+    quote: exact, capturedAt: Date.now(), ...(source?.fromTranslation ? { translation: source.translation } : {}), view: source && (!exact || source.quote === exact) ? source.view : 'legacy-unverified',
     anchor: source?.quote === exact ? source.anchor : { exact, prefix: '', suffix: '' },
     note: source?.view === 'translated'
       ? 'Captured from a translated page view. Switch to the original wording before creating a source-language passage link.'

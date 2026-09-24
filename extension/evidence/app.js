@@ -3,7 +3,10 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const uid=()=>crypto.randomUUID();
 const safeURL=s=>{try{const u=new URL(s);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}};
 const domain=s=>{try{return new URL(s).hostname.replace(/^www\./,'')}catch{return 'Source'}};
-const deepLink=n=>{const u=safeURL(n.url);if(!u)return '';if(n.pdf)return u.split('#')[0]+(n.page?'#page='+n.page:'');return u.split('#')[0]+(n.quote?'#:~:text='+encodeURIComponent(n.quote.trim()).replace(/-/g,'%2D'):'')};
+// Long passages (e.g. a whole paragraph) link by their first and last words,
+// which survives small differences in the middle better than the full text.
+const textFragment=q=>{q=q.trim().replace(/\s+/g,' ');const enc=t=>encodeURIComponent(t).replace(/-/g,'%2D');if(q.length<=160)return enc(q);const w=q.split(' ');return enc(w.slice(0,6).join(' '))+','+enc(w.slice(-6).join(' '))};
+const deepLink=n=>{const u=safeURL(n.url);if(!u)return '';if(n.pdf)return u.split('#')[0]+(n.page?'#page='+n.page:'');return u.split('#')[0]+(n.quote?'#:~:text='+textFragment(n.quote):'')};
 const readerMode=!!document.getElementById('seed-board');
 // Read once, before anything rewrites the URL: this is how a reload or a
 // reopened tab gets back to exactly where you were.
