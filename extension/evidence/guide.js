@@ -11,18 +11,19 @@ const TIPS = {
   'guide-f2': ['Facts narrow the rules', 'A second fact. Facts decide which rules apply: change one and the claims that follow may no longer hold.'],
   'guide-c1': ['Claims need evidence', 'White cards are <b>claims</b>: what a rule says, in your own words. The card below it is <b>evidence</b>: the exact words copied from the source. <b>Open at passage ↗</b> opens the page scrolled to that sentence and highlighted, so nobody has to hunt for it.'],
   'guide-old': ['Objections stay visible', 'This claim has an <b>objection</b>: the evidence below says otherwise (red dashed line on the board). Keep ruled-out assumptions on the board instead of deleting them, so a reader can see what you considered and why it failed.'],
-  'guide-c2': ['Weigh the routes', 'Another claim with its own passage. On the board, dotted lines mean <b>evidence supports</b> a card, and solid arrows mean <b>leads to</b>: your reasoning from one card to the next.'],
+  'guide-c2': ['Arrows read as sentences', 'Every arrow on the board reads like something you would say: “[this card] <b>because</b> [that card]”, “… <b>so</b> …”, “… <b>but</b> …”. The outline is the same thing written down: a line under another reads with its word in front. Click any word to change it.'],
   'guide-k': ['The working conclusion', 'The green card is your <b>conclusion</b>: the answer the argument arrives at. It also appears at the top of the page. It is your inference from the sources, not an official decision.'],
   'guide-q': ['Be honest about gaps', 'Dashed cards are <b>open questions</b>: what the sources don\'t settle. They double as your checklist for the call to the agency.<br><br>That was the <b>walkthrough</b>: the reading order you choose in Author mode (<b>Order steps</b>). Next, end the walkthrough, switch to <b>Author</b>, and move or edit anything. Your own boards start from <b>＋ New board</b>, or from passages you capture while browsing (<b>Evidence inbox</b>).'],
 };
 
 function tourBoard() {
-  const node = (id, type, x, y, text, extra = {}) => ({ id, type, x, y, text, ...extra });
+  // Laid out automatically, in the shape of the outline.
+  const node = (id, type, x, y, text, extra = {}) => ({ id, type, x, y, text, auto: true, ...extra });
   const evidence = (id, x, y, text, url, quote, note) => node(id, 'evidence', x, y, text,
     { url, quote, note, tier: 'Primary', checked: '2026-09-23', highlights: [], pdf: url.includes('/cdscontent/load?') });
   const link = (from, to, kind, label = '') => ({ id: crypto.randomUUID(), from, to, kind, label });
   return {
-    version: 1, title: TOUR_TITLE, sample: false, framing: 'build',
+    version: 1, title: TOUR_TITLE, sample: false,
     subtitle: 'A worked example: self-employed Austrian citizen, no previous coverage. Sources checked Sept 2026. Not advice.',
     nodes: [
       node('guide-f1', 'fact', 30, 125, 'Self-employed without a trade licence (freelance)', { note: 'Case assumption.' }),

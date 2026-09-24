@@ -67,8 +67,9 @@ export function init(api) {
       added = true;
     }
     let linked = false;
-    if (attachTo && attachTo !== card.id && !b.links.some(l => l.from === card.id && l.to === attachTo)) {
-      b.links.push({ id: api.uid(), from: card.id, to: attachTo, kind: api.allowedKinds(card.type)[0], label: '' });
+    if (attachTo && attachTo !== card.id && !b.links.some(l => (l.from === attachTo && l.to === card.id) || (l.from === card.id && l.to === attachTo))) {
+      // Reads "[target] because [this]" ("as the source says" for a quote).
+      b.links.push({ id: api.uid(), from: attachTo, to: card.id, word: api.fitWord(api.get(attachTo).type, card.type, 'because'), label: '' });
       linked = true;
     }
     if (!added && !linked) { api.select(card.id, true); return; }
@@ -81,11 +82,8 @@ export function init(api) {
   // down until it clears other cards.
   function besideCard(target) {
     const el = document.querySelector(`#canvas [data-node="${CSS.escape(target.id)}"]`);
-    // Reasons sit on the side the board reads from: right of the point when
-    // it reads answer first, left of it when it builds up.
-    const right = target.x + (el?.offsetWidth || 300) + 40;
-    let x = api.board.framing === 'build' ? target.x - 340 : right, y = target.y;
-    if (x < 0) x = right;
+    // Details sit to the right of the line they are about, as in the outline.
+    let x = target.x + (el?.offsetWidth || 300) + 40, y = target.y;
     const clash = yy => api.board.nodes.some(n => {
       const e = document.querySelector(`#canvas [data-node="${CSS.escape(n.id)}"]`), w = e?.offsetWidth || 300, h = e?.offsetHeight || 220;
       return x < n.x + w + 20 && x + 300 > n.x && yy < n.y + h + 20 && yy + 220 > n.y;

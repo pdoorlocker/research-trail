@@ -105,7 +105,7 @@ export function init(api) {
         : `${ref} [${n.type}] ${clip(n.text, 200)}${n.note ? ` (note: ${clip(n.note, 150)})` : ''}`);
     }
     if (!board.nodes.length) lines.push('(empty)');
-    const links = board.links.map(l => `${refOf(l.from)} ${l.kind} ${refOf(l.to)}${l.label ? ` (${l.label})` : ''}`).filter(s => !s.includes('undefined'));
+    const links = board.links.map(l => `${refOf(l.from)} ${api.wordLabel(l.word, api.get(l.to)?.type)} ${refOf(l.to)}${l.label ? ` (${l.label})` : ''}`).filter(s => !s.includes('undefined'));
     lines.push('', 'CONNECTIONS:', ...(links.length ? links : ['(none)']));
     lines.push('', 'WALKTHROUGH ORDER: ' + (api.sequence().map(refOf).filter(Boolean).join(', ') || '(none)'));
     lines.push('', 'EVIDENCE INBOX (captured passages not yet on the board):');
@@ -201,7 +201,7 @@ export function init(api) {
       if (from.ref === to.ref || (from.proposal && from.proposal === to.proposal) || (from.id && from.id === to.id)) return { error: 'A card cannot connect to itself.' };
       const key = p => p.id || p.proposal;
       const same = l => l.kind === a.kind && l.fromKey === key(from) && l.toKey === key(to);
-      if (proposals().some(p => p.type === 'link' && same(p)) || api.board.links.some(l => l.kind === a.kind && l.from === from.id && l.to === to.id)) return { ok: true, note: 'Connection already exists.' };
+      if (proposals().some(p => p.type === 'link' && same(p)) || api.board.links.some(l => (l.from === from.id && l.to === to.id) || (l.from === to.id && l.to === from.id))) return { ok: true, note: 'Connection already exists.' };
       proposals().push({ type: 'link', kind: a.kind, why: clip(a.why, 80), fromKey: key(from), toKey: key(to), fromText: from.text, toText: to.text, checked: true });
       return { ok: true };
     }
@@ -274,7 +274,10 @@ export function init(api) {
     for (const p of chosen.filter(p => p.type === 'link')) {
       const from = idOf(p.fromKey), to = idOf(p.toKey);
       if (!from || !to) continue;
-      board.links.push({ id: api.uid(), from, to, kind: api.fitKind(api.get(from).type, p.kind), label: p.why || '' }); count++;
+      // The model proposes "from supports/objects to/questions to"; the board
+      // stores reading order: "[to] because / one objection / which raises the question [from]".
+      const word = { challenges: 'objection', questions: 'question' }[p.kind] || 'because';
+      board.links.push({ id: api.uid(), from: to, to: from, word: api.fitWord(api.get(to).type, api.get(from).type, word), label: p.why || '' }); count++;
     }
     if (order) {
       const ids = [...new Set(order.keys.map(idOf).filter(Boolean))];

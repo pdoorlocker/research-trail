@@ -1,39 +1,33 @@
 // Outline: the low-friction way into a board. Jot thoughts as lines, then
-// shape them: indenting a line puts it under the line above as a reason for
-// it. The outline is a second view of the same cards and connections as the
-// spatial board; nothing is stored separately.
+// connect them with the words you would say out loud. The outline and the
+// spatial board are two views of the same cards and connections.
 //
-// Tree rule: a card's first connection to another card (links array order)
-// is its place in the outline. Any further connections are shown as
-// "also …" references so nothing on the board is hidden here.
+// Connections are stored in reading order ("[from] word [to]"). A line sits
+// under the card its first incoming connection comes from. How it is shown:
+//  - because / one objection / which raises the question / answer: indented
+//    under the line (details about that line);
+//  - so / and / but: the story continues. A single continuation flows straight
+//    down at the same level; several continuations from one line branch.
+// Further connections to a line appear as "also …" links, joined to it by a
+// line in the left margin, so nothing on the board is hidden here.
 
 const DEFAULT_TITLE = 'What am I trying to establish?';
 const TYPES = [['note', 'Thought'], ['fact', 'Fact'], ['claim', 'Claim'], ['conclusion', 'Conclusion'], ['gap', 'Question'], ['evidence', 'Quote']];
-// The connective is derived, not chosen: it follows from the lower line's
-// type, plus whether it argues for or against the line above. Read top to
-// bottom it is plain English: "<line above> because <this line>".
-// A later line arguing the same way as an earlier sibling reads as a
-// continuation ("and because", "but also"); nothing extra is stored.
-const stanceOf = kind => kind === 'challenges' ? 'against' : kind === 'questions' ? 'question' : 'for';
-const SO = /^(and so|so|thus|therefore|ergo),?\s/i;
-// "X, but Y" usually means "and there's also Y to reckon with", not "Y proves X
-// wrong": the two become joint reasons for a line you then write.
-const BUT = /^but,?\s/i;
-
-// Extra connections, phrased from each end.
-const ALSO_OUT = { reasoning: 'is also a reason why', supports: 'is also a source for', challenges: 'also objects to', questions: 'is also an open question for' };
-const ALSO_IN = { reasoning: 'also because', supports: 'as another source says', challenges: 'another objection:', questions: 'which also raises the question' };
-const PREFIX = { '?': 'gap', '>': 'evidence', '!': 'conclusion', '-': 'fact', '~': 'challenge' };
-const COL = 410, GAP_Y = 36, TREE_GAP = 90;
+const CONTINUES = new Set(['so', 'and', 'but']);
+const PREFIX = { '?': 'gap', '>': 'evidence', '!': 'conclusion', '-': 'fact' };
+// Words typed at the start of a line connect it to the line above; synonyms
+// normalise to one word per circumstance.
+const WORD_PREFIX = /^(and so|because|and|but|so|ergo|therefore|thus|answer|~)[,:]?\s+/i;
+const WORD_OF = { 'and so': 'so', ergo: 'so', therefore: 'so', thus: 'so', '~': 'objection' };
+const COL = 410, GAP_Y = 36, CHAIN_GAP = 64, TREE_GAP = 90, INDENT = 30;
 
 export function init(api) {
   const view = document.getElementById('outline-view');
   if (!view) return;
   const esc = api.esc;
-  let focus = null;          // { id, offset } to restore after a re-render
+  let focus = null;              // { id, offset } to restore after a re-render
   let pending = null, timer = 0; // debounced text edit { id, value }
-  // Cards that were never placed by hand get laid out the first time the
-  // board is shown, not only after an outline edit.
+  // Cards never placed by hand are laid out the first time the board shows.
   let needsLayout = api.board.nodes.some(n => n.auto), laying = false, dragId = null, inboxThoughts = [];
 
   // ---------- Model ----------
@@ -42,11 +36,11 @@ export function init(api) {
     const b = api.board, ids = new Set(b.nodes.map(n => n.id));
     const parentOf = new Map(), primary = new Map();
     for (const l of b.links) {
-      if (!ids.has(l.from) || !ids.has(l.to) || parentOf.has(l.from)) continue;
-      let p = l.to, cycle = false;
-      for (let i = 0; p && i < 600; i++) { if (p === l.from) { cycle = true; break; } p = parentOf.get(p); }
+      if (!ids.has(l.from) || !ids.has(l.to) || parentOf.has(l.to)) continue;
+      let p = l.from, cycle = false;
+      for (let i = 0; p && i < 600; i++) { if (p === l.to) { cycle = true; break; } p = parentOf.get(p); }
       if (cycle) continue;
-      parentOf.set(l.from, l.to); primary.set(l.from, l);
+      parentOf.set(l.to, l.from); primary.set(l.to, l);
     }
     ensureOrder();
     const children = new Map([[null, []]]);
@@ -55,37 +49,59 @@ export function init(api) {
       if (!children.has(p)) children.set(p, []);
       children.get(p).push(n);
     }
-    for (const list of children.values()) list.sort((a, b) => a.ord - b.ord);
-    return { parentOf, primary, children, kids: id => children.get(id) || [] };
+    for (const list of children.values()) list.sort((a, c) => a.ord - c.ord);
+    const kids = id => children.get(id) || [];
+    const wordOf = id => primary.get(id)?.word;
+    const details = id => kids(id).filter(k => !CONTINUES.has(wordOf(k.id)));
+    const continuations = id => kids(id).filter(k => CONTINUES.has(wordOf(k.id)));
+    return { parentOf, primary, kids, wordOf, details, continuations };
+  }
+
+  // The outline as it is displayed: rows with an indent level.
+  function displayRows(t) {
+    const out = [];
+    const emit = (n, indent) => {
+      out.push({ n, indent });
+      t.details(n.id).forEach(k => emit(k, indent + 1));
+      const next = t.continuations(n.id);
+      if (next.length === 1) emit(next[0], indent);
+      else next.forEach(k => emit(k, indent + 1));
+    };
+    t.kids(null).forEach(r => emit(r, 0));
+    return out;
   }
 
   // Older cards have no outline order: derive it once from board position.
   function ensureOrder() {
-    const missing = api.board.nodes.filter(n => !Number.isFinite(n.ord)).sort((a, b) => a.y - b.y || a.x - b.x);
+    const missing = api.board.nodes.filter(n => !Number.isFinite(n.ord)).sort((a, c) => a.y - c.y || a.x - c.x);
     if (!missing.length) return;
     let next = Math.max(0, ...api.board.nodes.filter(n => Number.isFinite(n.ord)).map(n => n.ord + 1));
     for (const n of missing) n.ord = next++;
   }
 
-  const kindFor = n => api.allowedKinds(n.type)[0];
   const textOf = n => n.type === 'evidence' ? (n.quote || n.displayedQuote || '') : n.text;
   const lockedQuote = n => n.type === 'evidence' && (n.sourceCaptureId || n.image || (!n.quote && n.displayedQuote));
+  const isDescendant = (id, ancestor, t) => { for (let p = id; p; p = t.parentOf.get(p)) if (p === ancestor) return true; return false; };
 
-  function isDescendant(id, ancestor, t) {
-    for (let p = id; p; p = t.parentOf.get(p)) if (p === ancestor) return true;
-    return false;
+  // Make `from` the line `id` hangs off, with `word`, replacing its current place.
+  function connect(id, fromId, word, t) {
+    const b = api.board, old = t.primary.get(id);
+    if (old) b.links = b.links.filter(l => l !== old);
+    if (!fromId) return;
+    const from = api.get(fromId), n = api.get(id), w = api.fitWord(from.type, n.type, word);
+    const existing = b.links.find(l => l.from === fromId && l.to === id);
+    if (existing) { existing.word = w; b.links = [existing, ...b.links.filter(l => l !== existing)]; return; }
+    b.links.unshift({ id: api.uid(), from: fromId, to: id, word: w, label: '' });
   }
 
-  function setParent(id, parentId, t, kind) {
-    const b = api.board, n = api.get(id), old = t.primary.get(id);
-    if (old) b.links = b.links.filter(l => l !== old);
-    if (!parentId) return;
-    // Something is now a reason for this line, so it is being argued: a claim.
-    const parent = api.get(parentId);
-    if (parent.type === 'note') applyType(parent, 'claim');
-    const existing = b.links.find(l => l.from === id && l.to === parentId);
-    if (existing) { b.links = [existing, ...b.links.filter(l => l !== existing)]; if (kind) existing.kind = kind; return; }
-    b.links.unshift({ id: api.uid(), from: id, to: parentId, kind: api.fitKind(n.type, kind || old?.kind || kindFor(n)), label: '' });
+  // Change how a line follows from the line above. When it stops continuing
+  // the story (and becomes a detail), what followed it goes back to its parent.
+  function setWord(id, word, t) {
+    const l = t.primary.get(id);
+    if (!l) return;
+    const parent = t.parentOf.get(id);
+    if (CONTINUES.has(l.word) && !CONTINUES.has(word)) for (const k of t.continuations(id)) connect(k.id, parent, t.wordOf(k.id), t);
+    l.word = api.fitWord(api.get(l.from).type, api.get(id).type, word);
   }
 
   function orderBetween(list, index) {
@@ -112,6 +128,7 @@ export function init(api) {
     const steps = api.board.steps;
     if (['note', 'evidence'].includes(type)) api.board.steps = steps.filter(id => id !== n.id);
     else if (!steps.includes(n.id)) steps.push(n.id);
+    for (const l of api.board.links) if (l.from === n.id || l.to === n.id) l.word = api.fitWord(api.get(l.from)?.type || n.type, api.get(l.to)?.type || n.type, l.word);
   }
 
   // ---------- Edits (each one is a single undo step) ----------
@@ -120,6 +137,8 @@ export function init(api) {
     flushText();
     const t = tree();
     if (fn(t) === false) return;
+    // A thought that something now backs up is being argued: a claim.
+    for (const n of api.board.nodes) if (n.type === 'note' && api.supportersOf(n.id).length) applyType(n, 'claim');
     if (nextFocus !== undefined) focus = nextFocus;
     needsLayout = true;
     layout(false);
@@ -137,89 +156,69 @@ export function init(api) {
     api.persist();
   }
 
+  // Enter: a parallel detail repeats the line's word ("and because …");
+  // otherwise the story continues ("and …"), or a new separate thought.
   function addLine(afterId, text = '', type = 'note') {
     change(t => {
       const b = api.board;
       if (b.nodes.length >= 500) { api.notify('This board has reached the 500-card limit.'); return false; }
-      const after = afterId && api.get(afterId);
-      const parent = after ? t.parentOf.get(after.id) ?? null : null;
-      const siblings = t.kids(parent), index = after ? siblings.indexOf(after) + 1 : siblings.length;
       const n = newCard(type, text);
-      n.ord = orderBetween(siblings, index);
       b.nodes.push(n);
-      if (parent) setParent(n.id, parent, t);
+      const after = afterId && api.get(afterId), parent = after ? t.parentOf.get(after.id) : null, word = after && t.wordOf(after.id);
+      if (after && parent && !CONTINUES.has(word)) {
+        const siblings = t.kids(parent);
+        n.ord = orderBetween(siblings, siblings.indexOf(after) + 1);
+        connect(n.id, parent, word, t);
+      } else if (after && (parent || t.continuations(after.id).length)) {
+        // Insert into the chain: the new line continues this one, and what
+        // used to follow now follows the new line.
+        n.ord = 0;
+        for (const k of t.continuations(after.id)) connect(k.id, n.id, t.wordOf(k.id), t);
+        connect(n.id, after.id, 'and', t);
+      } else {
+        const roots = t.kids(null);
+        n.ord = after ? orderBetween(roots, roots.indexOf(after) + 1) : Math.max(0, ...roots.map(r => r.ord + 1));
+      }
       focus = { id: n.id, offset: text.length };
     });
   }
 
-  const building = () => api.board.framing === 'build';
-
-  // Build up: this line becomes a reason for the next line at its level.
-  function indentBuild(id) {
-    change(t => {
-      const n = api.get(id), siblings = t.kids(t.parentOf.get(id) ?? null), next = siblings[siblings.indexOf(n) + 1];
-      if (!next) return false;
-      setParent(id, next.id, t);
-      const kids = t.kids(next.id).filter(k => k.id !== id);
-      n.ord = kids.length ? kids.at(-1).ord + 1 : 0;
-    }, { id, offset: caretOffset() });
+  // The line a new connection hangs off: the nearest row above at the same level.
+  function lineAbove(id, t = tree()) {
+    const rows = displayRows(t), i = rows.findIndex(r => r.n.id === id);
+    for (let j = i - 1; j >= 0; j--) {
+      if (rows[j].indent === rows[i].indent && !isDescendant(rows[j].n.id, id, t)) return rows[j].n;
+      if (rows[j].indent < rows[i].indent) return rows[j].n;
+    }
+    return null;
   }
 
-  // Build up: "so …" turns the reasons written just above into reasons for
-  // this line (the run of plain lines since the last conclusion drawn).
-  function reasonsAbove(id, t = tree()) {
-    const siblings = t.kids(t.parentOf.get(id) ?? null), run = [];
-    for (let j = siblings.indexOf(api.get(id)) - 1; j >= 0 && !t.kids(siblings[j].id).length; j--) run.unshift(siblings[j]);
-    return run;
-  }
-  function gather(id, offset = 0) {
-    if (!reasonsAbove(id).length) { api.notify('Write the reasons first, then start the next line with “so”.'); return false; }
-    change(t => { reasonsAbove(id, t).forEach((r, k) => { setParent(r.id, id, t); r.ord = k; }); }, { id, offset });
-    return true;
-  }
-
-  function joinTarget(id, t = tree()) {
-    const n = api.get(id), parentId = t.parentOf.get(id) ?? null, siblings = t.kids(parentId), i = siblings.indexOf(n);
-    return i > 0 ? siblings[i - 1] : parentId ? api.get(parentId) : null;
-  }
-  function joinWithAbove(id) {
-    const other = joinTarget(id);
-    if (!other) return false;
-    change(t => {
-      const b = api.board, n = api.get(id), grand = t.parentOf.get(other.id) ?? null, oldKind = t.primary.get(other.id)?.kind;
-      const joint = newCard('note', '');
-      joint.ord = other.ord;
-      b.nodes.push(joint);
-      setParent(other.id, joint.id, t); other.ord = 0;
-      setParent(id, joint.id, t); n.ord = 1;
-      if (grand) setParent(joint.id, grand, t, oldKind);
-      focus = { id: joint.id, offset: 0 };
-    });
-    api.notify('Made these two reasons for a new line. Write what they add up to.');
-    return true;
-  }
-
+  // Tab: this line is a reason for the line above it.
   function indent(id) {
-    if (building()) return indentBuild(id);
     change(t => {
-      const n = api.get(id), siblings = t.kids(t.parentOf.get(id) ?? null), i = siblings.indexOf(n);
-      if (i < 1) return false;
-      const newParent = siblings[i - 1];
-      setParent(id, newParent.id, t);
-      const kids = t.kids(newParent.id);
-      n.ord = kids.length ? kids.at(-1).ord + 1 : 0;
+      const above = lineAbove(id, t);
+      if (!above || above.id === t.parentOf.get(id) && !CONTINUES.has(t.wordOf(id))) return false;
+      connect(id, above.id, 'because', t);
+      const kids = t.details(above.id).filter(k => k.id !== id);
+      api.get(id).ord = kids.length ? kids.at(-1).ord + 1 : 0;
     }, { id, offset: caretOffset() });
   }
 
+  // Shift+Tab: step out to the level of the line it hangs off.
   function outdent(id) {
-    if (building() && !tree().parentOf.get(id)) return gather(id, caretOffset());
     change(t => {
       const parent = t.parentOf.get(id);
       if (!parent) return false;
-      const grand = t.parentOf.get(parent) ?? null, siblings = t.kids(grand), p = api.get(parent);
-      setParent(id, grand, t);
-      // Build up shows reasons above what they lead to, so step out upwards.
-      api.get(id).ord = orderBetween(siblings, siblings.indexOf(p) + (building() ? 0 : 1));
+      const grand = t.parentOf.get(parent), n = api.get(id);
+      if (grand) {
+        connect(id, grand, t.wordOf(parent), t);
+        const siblings = t.kids(grand);
+        n.ord = orderBetween(siblings, siblings.indexOf(api.get(parent)) + 1);
+      } else {
+        connect(id, null, null, t);
+        const roots = t.kids(null);
+        n.ord = orderBetween(roots, roots.indexOf(api.get(parent)) + 1);
+      }
     }, { id, offset: caretOffset() });
   }
 
@@ -233,7 +232,7 @@ export function init(api) {
 
   function removeLine(id, focusAfter) {
     change(t => {
-      if (t.kids(id).length) { api.notify('Move or delete the lines underneath first.'); return false; }
+      if (t.kids(id).length) { api.notify('Move or delete the lines that follow from it first.'); return false; }
       const b = api.board;
       b.nodes = b.nodes.filter(n => n.id !== id);
       b.links = b.links.filter(l => l.from !== id && l.to !== id);
@@ -241,22 +240,27 @@ export function init(api) {
     }, focusAfter ? { id: focusAfter, offset: Infinity } : null);
   }
 
+  // Dropped onto a line: it becomes a reason for that line.
   function reparent(id, targetId) {
     change(t => {
       if (id === targetId || (targetId && isDescendant(targetId, id, t))) return false;
-      setParent(id, targetId, t);
+      connect(id, targetId, 'because', t);
       const kids = t.kids(targetId ?? null).filter(n => n.id !== id);
       api.get(id).ord = kids.length ? kids.at(-1).ord + 1 : 0;
     }, null);
   }
 
-  // Leading shortcut characters set the type, then disappear.
-  function readPrefix(text) {
-    const m = text.match(/^([?>!~-])\s/);
-    return m ? { kind: PREFIX[m[1]], rest: text.slice(2) } : null;
-  }
+  const readPrefix = text => { const m = text.match(/^([?>!-])\s/); return m ? { type: PREFIX[m[1]], rest: text.slice(2) } : null; };
+  const readWord = text => {
+    const m = text.match(WORD_PREFIX);
+    if (!m) return null;
+    const w = m[1].toLowerCase();
+    return { word: WORD_OF[w] || w, rest: text.slice(m[0].length) };
+  };
+  const capitalise = s => s.replace(/^\s*(\p{Ll})/u, (_, c) => c.toUpperCase());
 
-  // ---------- Automatic layout for cards nobody has placed by hand ----------
+  // ---------- Automatic layout, shaped like the outline ----------
+  // A chain runs down one column; details sit in the next column to the right.
 
   function estimate(n) {
     const lines = (s, per) => Math.max(1, Math.ceil(String(s || '').length / per));
@@ -269,39 +273,33 @@ export function init(api) {
     return el?.offsetHeight || estimate(n);
   }
 
-  // Trees made only of automatic cards get a tidy left-to-right layout
-  // (reasons to the left of what they support). Automatic cards inside a
-  // hand-arranged tree are placed once beside their parent, then left alone.
   function layout(measured) {
     const t = tree(), b = api.board;
-    // A tree is laid out tidily when its top card was never placed by hand;
-    // cards inside it that you did place keep their spot.
     const managed = new Set();
     const collect = n => { managed.add(n.id); t.kids(n.id).forEach(collect); };
     t.kids(null).filter(r => r.auto).forEach(collect);
+    const h = n => measured ? height(n) : estimate(n);
     const manual = b.nodes.filter(n => !n.auto && !managed.has(n.id));
-    let top = manual.length ? Math.max(...manual.map(n => n.y + (measured ? height(n) : estimate(n)))) + TREE_GAP : 100;
+    let top = manual.length ? Math.max(...manual.map(n => n.y + h(n))) + TREE_GAP : 100;
     let changed = false;
     const put = (n, x, y) => { x = Math.round(x); y = Math.round(y); if (n.x !== x || n.y !== y) { n.x = x; n.y = y; changed = true; } };
-    const h = n => measured ? height(n) : estimate(n);
-    const depthOf = n => 1 + Math.max(0, ...t.kids(n.id).map(depthOf));
-    const placed = new Set();
-    for (const root of t.kids(null)) {
-      if (!root.auto) continue;
-      const depth = depthOf(root) - 1;
-      const place = (n, d, y) => {
-        placed.add(n.id);
-        let cursor = y;
-        for (const k of t.kids(n.id)) cursor = place(k, d + 1, cursor) + GAP_Y;
-        if (n.auto) put(n, 30 + (b.framing === 'build' ? depth - d : d) * COL, y);
-        return Math.max(y + h(n), t.kids(n.id).length ? cursor - GAP_Y : 0);
-      };
-      top = place(root, 0, top) + TREE_GAP;
-    }
+    const place = (n, col, y) => {
+      if (n.auto) put(n, 30 + col * COL, y);
+      let right = y;
+      for (const k of t.details(n.id)) right = place(k, col + 1, right) + GAP_Y;
+      let bottom = Math.max(y + h(n), t.details(n.id).length ? right - GAP_Y : 0);
+      const next = t.continuations(n.id);
+      if (next.length === 1) bottom = place(next[0], col, bottom + CHAIN_GAP);
+      else for (const k of next) bottom = place(k, col + 1, bottom + GAP_Y);
+      return bottom;
+    };
+    for (const root of t.kids(null)) if (root.auto) top = place(root, 0, top) + TREE_GAP;
+    // Automatic cards inside a hand-arranged tree: placed once near the card
+    // they follow from, then left where they are.
     for (const n of b.nodes) {
-      if (!n.auto || placed.has(n.id)) continue;
-      const parent = api.get(t.parentOf.get(n.id));
-      let x = parent ? Math.max(0, parent.x + (b.framing === 'build' ? -COL : COL)) : 30, y = parent ? parent.y : top;
+      if (!n.auto || managed.has(n.id)) continue;
+      const parent = api.get(t.parentOf.get(n.id)), cont = CONTINUES.has(t.wordOf(n.id));
+      let x = parent ? parent.x + (cont ? 0 : COL) : 30, y = parent ? parent.y + (cont ? h(parent) + CHAIN_GAP : 0) : top;
       const hit = yy => b.nodes.some(o => o !== n && !o.auto && x < o.x + 330 && x + 330 > o.x && yy < o.y + h(o) + 30 && yy + h(n) + 30 > o.y);
       for (let i = 0; i < 200 && hit(y); i++) y += 40;
       put(n, x, y);
@@ -310,10 +308,7 @@ export function init(api) {
     return changed;
   }
 
-  // Cards placed from elsewhere (e.g. dropped from the inbox) ask to be laid out.
   api.requestLayout = () => { needsLayout = true; };
-
-  // After the spatial board renders, re-run the layout with real card sizes.
   api.onRender(() => {
     if (laying) return;
     if (api.tab === 'map' && needsLayout) {
@@ -327,83 +322,68 @@ export function init(api) {
   // ---------- Rendering ----------
 
   function renderOutline() {
-    const t = tree(), b = api.board;
-    const incomingExtra = new Map();
-    for (const l of b.links) {
-      if (t.primary.get(l.from) === l) continue;
-      if (!incomingExtra.has(l.to)) incomingExtra.set(l.to, []);
-      incomingExtra.get(l.to).push(l);
-    }
-    const hasSource = id => b.links.some(l => l.to === id && l.kind === 'supports' && api.get(l.from)?.type === 'evidence');
-    const build = b.framing === 'build';
-    const row = n => {
-      const parent = t.parentOf.get(n.id), rel = t.primary.get(n.id)?.kind;
-      const siblings = parent ? t.kids(parent) : [];
-      const again = siblings.slice(0, siblings.indexOf(n)).some(o => stanceOf(t.primary.get(o.id)?.kind) === stanceOf(rel));
-      const kids = t.kids(n.id), locked = lockedQuote(n);
-      const hint = n.type === 'claim' && !hasSource(n.id) && !kids.some(k => k.type === 'evidence') ? 'no source yet'
-        : n.type === 'conclusion' && !kids.length && !b.links.some(l => l.to === n.id) ? 'no reasons yet'
+    const t = tree(), b = api.board, rows = displayRows(t);
+    const main = api.mainConclusion?.();
+    const row = ({ n, indent }) => {
+      const parent = t.parentOf.get(n.id), link = t.primary.get(n.id), word = link?.word;
+      const siblings = parent ? t.details(parent) : [];
+      const again = parent && !CONTINUES.has(word) && siblings.slice(0, siblings.indexOf(n)).some(o => t.wordOf(o.id) === word);
+      const locked = lockedQuote(n), from = parent && api.get(parent);
+      const hasSource = api.supportersOf(n.id).some(id => api.get(id)?.type === 'evidence');
+      const hint = n.type === 'claim' && !hasSource ? 'no source yet'
+        : n.type === 'conclusion' && !api.supportersOf(n.id).length ? 'no reasons yet'
         : n.type === 'evidence' && !n.url ? 'add where this is from' : '';
-      const extras = [
-        ...b.links.filter(l => l.from === n.id && t.primary.get(n.id) !== l).map(l => [l.to, ALSO_OUT[l.kind], l.id]),
-        ...(incomingExtra.get(n.id) || []).map(l => [l.from, ALSO_IN[l.kind], l.id]),
-      ].filter(([id]) => api.get(id));
-      const childBlock = kids.length ? `<ul class="ol-children">${kids.map(row).join('')}</ul>` : '';
-      return `<li class="ol-item" data-id="${esc(n.id)}">
-        ${build ? childBlock : ''}
+      const extras = b.links.filter(l => l.from === n.id && t.primary.get(l.to) !== l && api.get(l.to));
+      const choices = from ? api.WORD_CHOICES.filter(([v]) => api.allowedWords(from.type, n.type).includes(v)) : [];
+      return `<li class="ol-item" data-id="${esc(n.id)}" style="--indent:${indent}">
         <div class="ol-row" data-row="${esc(n.id)}">
-          <span class="ol-grip" draggable="true" data-grip="${esc(n.id)}" title="Drag onto another line to put it underneath">⠿</span>
+          <span class="ol-grip" draggable="true" data-grip="${esc(n.id)}" title="Drag onto another line to make it a reason for that line">⠿</span>
           <select class="ol-type type-${esc(n.type)}" data-type="${esc(n.id)}" aria-label="Kind of line">${TYPES.map(([v, l]) => `<option value="${v}" ${v === n.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          ${parent && !(build && kids.length) ? (n.type === 'gap'
-            ? `<span class="ol-rel is-fixed">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</span>`
-            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? `An objection to the line ${build ? 'it leads to' : 'above'}. Click to make it support it instead.` : `Supports the line ${build ? 'it leads to' : 'above'}. Click to make it an objection instead.`}">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</button>`) : ''}
-          ${build && kids.length ? `<span class="ol-rel is-fixed is-lead ${rel === 'challenges' ? 'rel-challenges' : ''}" ${rel === 'challenges' ? 'title="This conclusion is an objection to the one it leads to"' : ''}>${kids.some(k => stanceOf(t.primary.get(k.id)?.kind) === 'for') ? 'and so' : kids.some(k => t.primary.get(k.id)?.kind === 'challenges') ? 'still,' : ''}</span>` : ''}
-          <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : kids.length ? (build ? 'and so… what follows?' : 'What do the lines below add up to?') : 'Type a thought…'}">${esc(textOf(n))}</div>
+          ${from ? `<select class="ol-rel rel-${esc(word)}" data-word="${esc(n.id)}" aria-label="How this line follows from “${esc(clip(textOf(from), 40))}”" title="Reads: “${esc(clip(textOf(from), 40))}” ${esc(api.wordLabel(word, n.type))} this line">${choices.map(([v]) => `<option value="${v}" ${v === word ? 'selected' : ''}>${esc(api.wordLabel(v, n.type, again && v === word))}</option>`).join('')}</select>` : ''}
+          <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : 'Type a thought…'}">${esc(textOf(n))}</div>
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
-          ${n.type === 'conclusion' ? (api.mainConclusion()?.id === n.id ? '<span class="ol-answer">answers the question</span>' : api.isInterim(n) ? '<span class="ol-source">interim</span>' : '') : ''}
+          ${n.type === 'conclusion' ? (main?.id === n.id ? '<span class="ol-answer">answers the question</span>' : api.isInterim(n) ? '<span class="ol-source">interim</span>' : '') : ''}
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
-        ${extras.length ? `<div class="ol-extras">${extras.map(([id, label, linkId]) => `<button data-goto="${esc(id)}" data-link="${esc(linkId)}">${esc(label)} ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o) || o.text, 60)) + '”' : esc(clip(o.text, 60)))(api.get(id))}</button>`).join('')}</div>` : ''}
-        ${build ? '' : childBlock}
+        ${extras.map(l => `<button class="ol-also" data-goto="${esc(l.to)}" data-link="${esc(l.id)}">↳ also, ${esc(api.wordLabel(l.word, api.get(l.to).type))}: ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o), 60)) + '”' : esc(clip(o.text, 60)))(api.get(l.to))}</button>`).join('')}
       </li>`;
     };
     const title = b.title === DEFAULT_TITLE ? '' : b.title;
-    const roots = t.kids(null);
     const unplaced = inboxThoughts.filter(c => !b.nodes.some(n => n.sourceCaptureId === c.id));
     view.innerHTML = `
       <div class="ol-shell">
         <label class="ol-label" for="ol-title">Question</label>
         <input id="ol-title" class="ol-title" value="${esc(title)}" placeholder="What are you trying to figure out? (optional, add it later)">
         ${unplaced.length ? `<div class="ol-inbox"><span>${unplaced.length} thought${unplaced.length === 1 ? '' : 's'} jotted from the side panel</span><button data-add-jots>Add to outline</button></div>` : ''}
-        <div class="ol-tree-wrap"><ul class="ol-tree ${build ? 'is-build' : ''}" aria-label="Outline">${roots.map(row).join('')}</ul><svg class="ol-arrows" aria-hidden="true"></svg></div>
-        ${roots.length ? '' : '<p class="ol-empty">Nothing here yet. Write whatever you already know or suspect, one thought per line. Sort it out afterwards.</p>'}
-        <div class="ol-drop-root" data-drop-root>Drop here to move a line to the top level</div>
-        <form class="ol-jot" id="ol-jot-form"><input id="ol-jot" placeholder="Jot a thought and press Enter" autocomplete="off" aria-label="Jot a thought"><button class="dark">Add</button></form>
-        <p class="ol-keys">${build ? '<kbd>Tab</kbd> make it a reason for the line below · start a line with <kbd>so</kbd> to draw a conclusion from the lines above ·' : '<kbd>Tab</kbd> put under the line above · <kbd>⇧ Tab</kbd> move out ·'} <kbd>Alt ↑↓</kbd> reorder · start a line with <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you <kbd>~</kbd> objection · <kbd>but</kbd> joins two lines as reasons for a new one</p>
-        ${roots.length > 1 || roots.some(r => t.kids(r.id).length) ? '<div class="ol-actions"><button data-order-from-outline title="Reasons first, then what they lead to">Use this order for the walkthrough</button><button data-tidy>Re-arrange the board from this outline</button></div>' : ''}
+        <div class="ol-tree-wrap"><ul class="ol-tree" aria-label="Outline">${rows.map(row).join('')}</ul><svg class="ol-arrows" aria-hidden="true"></svg></div>
+        ${rows.length ? '' : '<p class="ol-empty">Nothing here yet. Write whatever you already know or suspect, one thought per line, or paste your notes. Sort it out afterwards.</p>'}
+        <div class="ol-drop-root" data-drop-root>Drop here to make it a separate thought</div>
+        <form class="ol-jot" id="ol-jot-form"><input id="ol-jot" placeholder="Jot a thought and press Enter, or paste your notes" autocomplete="off" aria-label="Jot a thought"><button class="dark">Add</button></form>
+        <p class="ol-keys">Start a line with <kbd>because</kbd> <kbd>and</kbd> <kbd>but</kbd> <kbd>so</kbd> <kbd>answer</kbd> or <kbd>~</kbd> (an objection) to connect it to the line above · <kbd>Tab</kbd> a reason for the line above · <kbd>⇧ Tab</kbd> step out · <kbd>Alt ↑↓</kbd> reorder · <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you</p>
+        ${rows.length > 1 ? '<div class="ol-actions"><button data-order-from-outline title="Walk through the argument in the order the outline reads">Use this order for the walkthrough</button><button data-tidy>Re-arrange the board from this outline</button></div>' : ''}
       </div>`;
     restoreFocus();
     drawArrows();
   }
 
-  // Extra connections (beyond the outline's nesting) drawn as arrows in the
-  // right margin, from the supporting line to the line it supports.
+  // "Also" connections drawn in the left margin, from the "↳ also" line to
+  // the line it points at.
   function drawArrows() {
     const wrap = view.querySelector('.ol-tree-wrap'), svg = wrap?.querySelector('.ol-arrows');
     if (!svg) return;
-    const t = tree(), box = wrap.getBoundingClientRect();
-    const links = api.board.links.filter(l => t.primary.get(l.from) !== l);
+    const box = wrap.getBoundingClientRect();
     let lane = 0;
-    const paths = links.map(l => {
-      const a = wrap.querySelector(`[data-row="${CSS.escape(l.from)}"]`), c = wrap.querySelector(`[data-row="${CSS.escape(l.to)}"]`);
-      if (!a || !c) return '';
-      const ra = a.getBoundingClientRect(), rc = c.getBoundingClientRect();
-      const y1 = ra.top - box.top + Math.min(16, ra.height / 2), y2 = rc.top - box.top + Math.min(16, rc.height / 2);
-      const edge = box.width + 4, out = edge + 16 + (lane++ % 3) * 9;
-      return `<path class="k-${esc(l.kind)}" data-arrow="${esc(l.id)}" d="M${edge},${y1} C${out},${y1} ${out},${y2} ${edge + 3},${y2}" marker-end="url(#ol-head)"/>`;
+    const paths = [...wrap.querySelectorAll('.ol-also')].map(ref => {
+      const target = wrap.querySelector(`[data-row="${CSS.escape(ref.dataset.goto)}"] .ol-text`);
+      if (!target) return '';
+      const ra = ref.getBoundingClientRect(), rt = target.getBoundingClientRect();
+      const x1 = ra.left - box.left - 4, y1 = ra.top - box.top + ra.height / 2;
+      const x2 = rt.left - box.left - 6, y2 = rt.top - box.top + Math.min(12, rt.height / 2);
+      const out = -10 - (lane++ % 3) * 7;
+      return `<path class="k-${esc(api.board.links.find(l => l.id === ref.dataset.link)?.word || '')}" data-arrow="${esc(ref.dataset.link)}" d="M${x1},${y1} C${out},${y1} ${out},${y2} ${x2},${y2}" marker-end="url(#ol-head)"/>`;
     }).join('');
-    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${paths}`;
+    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${paths}`;
   }
   new ResizeObserver(() => { if (api.tab === 'outline') drawArrows(); }).observe(view);
   view.addEventListener('mouseover', e => {
@@ -440,38 +420,78 @@ export function init(api) {
   }
   const visibleRows = () => [...view.querySelectorAll('[data-text]')];
 
+  // ---------- Paste: indented notes keep their structure ----------
+
+  // Bulleted or indented lines; a leading because/and/but/so/ergo/answer
+  // connects a line, a trailing "?" makes a question.
+  function parseNotes(text) {
+    const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+    if (lines.length < 2) return null;
+    const unit = Math.min(...lines.map(l => (l.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length)).filter(n => n > 0), 4) || 4;
+    return lines.map(l => {
+      const lead = l.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+      let body = l.trim().replace(/^([*\-•–·]|\d+[.)])\s+/, '');
+      const w = readWord(body + ' ');
+      if (w) body = w.rest.trim();
+      body = capitalise(body);
+      return { depth: Math.round(lead / unit), word: w?.word || null, text: body, type: /\?\s*$/.test(body) ? 'gap' : 'note' };
+    });
+  }
+
+  function importNotes(items) {
+    change(t => {
+      const b = api.board, stack = [];
+      let ord = Math.max(0, ...t.kids(null).map(r => r.ord + 1));
+      const lastAt = new Map(); // depth -> last line at that depth under the current parent
+      for (const it of items) {
+        if (b.nodes.length >= 500) break;
+        const n = newCard(it.type, it.text);
+        b.nodes.push(n);
+        while (stack.length > it.depth) stack.pop();
+        const parent = stack[it.depth - 1] || null, prev = lastAt.get(it.depth);
+        const prevHere = prev && prev.parent === parent ? prev.node : null;
+        if (it.word && CONTINUES.has(it.word) && prevHere) connect(n.id, prevHere.id, it.word, t);
+        else if (parent) connect(n.id, parent.id, it.word || 'because', t);
+        else if (it.word && prevHere) connect(n.id, prevHere.id, it.word, t);
+        n.ord = ord++;
+        stack[it.depth] = n; stack.length = it.depth + 1;
+        lastAt.set(it.depth, { node: n, parent });
+        for (const d of [...lastAt.keys()]) if (d > it.depth) lastAt.delete(d);
+      }
+      // Imported notes read in the order you wrote them.
+      const order = displayRows(tree()).map(r => r.n).filter(n => !['note', 'evidence'].includes(n.type)).map(n => n.id);
+      b.steps = [...order, ...b.steps.filter(id => !order.includes(id))];
+    }, null);
+    api.notify(`Imported ${items.length} lines. Change any word by clicking it.`);
+  }
+
+  view.addEventListener('paste', e => {
+    const text = e.clipboardData?.getData('text/plain') || '';
+    const items = parseNotes(text);
+    if (!items) return;
+    e.preventDefault();
+    importNotes(items);
+  });
+
   // ---------- Events ----------
 
   view.addEventListener('input', e => {
     const el = e.target.closest('[data-text]');
     if (!el) return;
-    const id = el.dataset.text, n = api.get(id);
-    let value = el.textContent;
-    if (BUT.test(value) && joinTarget(id)) {
-      pending = { id, value: value.replace(BUT, '') };
-      flushText();
-      return joinWithAbove(id);
-    }
-    if (building() && SO.test(value) && reasonsAbove(id).length) {
-      pending = { id, value: value.replace(SO, '') };
-      flushText();
-      return gather(id, 0);
-    }
+    const id = el.dataset.text, n = api.get(id), value = el.textContent;
     requestAnimationFrame(drawArrows);
+    const w = readWord(value);
+    if (w) {
+      const t = tree(), above = t.parentOf.get(id) ? api.get(t.parentOf.get(id)) : lineAbove(id, t);
+      if (above) {
+        pending = { id, value: capitalise(w.rest) };
+        return change(t2 => { if (t2.parentOf.get(id) === above.id) setWord(id, w.word, t2); else connect(id, above.id, w.word, t2); }, { id, offset: 0 });
+      }
+    }
     const prefix = readPrefix(value);
-    if (prefix && (n.type === 'note' || prefix.kind === 'challenge')) {
+    if (prefix && n.type === 'note') {
       pending = { id, value: prefix.rest };
-      return change(t => {
-        if (prefix.kind === 'challenge') {
-          if (n.type === 'note') applyType(n, 'claim');
-          const parent = t.parentOf.get(id);
-          if (parent) t.primary.get(id).kind = 'challenges';
-        } else {
-          applyType(n, prefix.kind);
-          const link = t.primary.get(id);
-          if (link) link.kind = api.fitKind(n.type, link.kind);
-        }
-      }, { id, offset: 0 });
+      return change(() => { applyType(n, prefix.type); }, { id, offset: 0 });
     }
     pending = { id, value };
     clearTimeout(timer);
@@ -506,15 +526,13 @@ export function init(api) {
   view.addEventListener('focusout', e => { if (e.target.closest('[data-text]')) flushText(); });
 
   view.addEventListener('change', e => {
-    const typeSel = e.target.closest('[data-type]');
+    const typeSel = e.target.closest('[data-type]'), wordSel = e.target.closest('[data-word]');
     if (typeSel) {
       const id = typeSel.dataset.type;
-      change(t => {
-        const n = api.get(id);
-        applyType(n, typeSel.value);
-        const link = t.primary.get(id);
-        if (link) link.kind = api.fitKind(n.type, link.kind);
-      }, { id, offset: Infinity });
+      change(() => { applyType(api.get(id), typeSel.value); }, { id, offset: Infinity });
+    } else if (wordSel) {
+      const id = wordSel.dataset.word;
+      change(t => { setWord(id, wordSel.value, t); }, null);
     } else if (e.target.id === 'ol-title') {
       api.board.title = e.target.value.trim() || DEFAULT_TITLE;
       api.persist(); api.render();
@@ -526,36 +544,34 @@ export function init(api) {
     e.preventDefault();
     const input = view.querySelector('#ol-jot'), raw = input.value.trim();
     if (!raw) return;
-    const prefix = readPrefix(raw + ' ');
-    const type = prefix && prefix.kind !== 'challenge' ? prefix.kind : 'note';
-    const text = prefix ? prefix.rest.trim() : raw;
-    if (BUT.test(raw) && tree().kids(null).length) {
-      addLine(null, raw.replace(BUT, '').trim(), type);
-      const last = tree().kids(null).at(-1);
-      if (last) joinWithAbove(last.id);
-      return;
-    } else if (building() && SO.test(raw)) {
-      addLine(null, raw.replace(SO, '').trim(), type);
-      const last = tree().kids(null).at(-1);
-      if (last) gather(last.id);
+    const w = readWord(raw + ' ');
+    const body = w ? capitalise(w.rest.trim()) : raw;
+    const prefix = readPrefix(body + ' ');
+    const type = prefix ? prefix.type : /\?\s*$/.test(body) ? 'gap' : 'note';
+    const text = prefix ? prefix.rest.trim() : body;
+    const rows = displayRows(tree()), lastTop = [...rows].reverse().find(r => r.indent === 0)?.n;
+    if (w && lastTop) {
+      change(t => {
+        const n = newCard(type, text);
+        api.board.nodes.push(n);
+        n.ord = Math.max(0, ...t.kids(lastTop.id).map(k => k.ord + 1));
+        connect(n.id, lastTop.id, w.word, t);
+      }, { id: 'jot' });
     } else addLine(null, text, type);
     focus = { id: 'jot' };
     renderOutline();
   });
 
   view.addEventListener('click', e => {
-    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]'), stance = e.target.closest('[data-stance]');
-    if (stance) {
-      const id = stance.dataset.stance;
-      change(t => { const l = t.primary.get(id); l.kind = l.kind === 'challenges' ? kindFor(api.get(id)) : 'challenges'; }, null);
-    } else if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
+    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]');
+    if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
     else if (go) { focus = { id: go.dataset.goto, offset: Infinity }; restoreFocus(); }
     else if (e.target.closest('[data-order-from-outline]')) orderFromOutline();
     else if (e.target.closest('[data-tidy]')) tidy();
     else if (e.target.closest('[data-add-jots]')) addJots();
   });
 
-  // Drag a line by its grip onto another line to put it underneath.
+  // Drag a line by its grip onto another line to make it a reason for it.
   view.addEventListener('dragstart', e => {
     const grip = e.target.closest('[data-grip]');
     if (!grip) return;
@@ -581,12 +597,10 @@ export function init(api) {
     reparent(id, target.dataset.row || null);
   });
 
-  // Reasons before what they lead to: a depth-first, children-first reading.
+  // The walkthrough reads the argument in the outline's order.
   function orderFromOutline() {
     change(t => {
-      const out = [];
-      const walk = n => { t.kids(n.id).forEach(walk); if (!['note', 'evidence'].includes(n.type)) out.push(n.id); };
-      t.kids(null).forEach(walk);
+      const out = displayRows(t).map(r => r.n).filter(n => !['note', 'evidence'].includes(n.type)).map(n => n.id);
       api.board.steps = [...out, ...api.board.steps.filter(id => !out.includes(id) && api.get(id))];
     }, null);
     api.notify('Walkthrough now follows the outline. Undo restores the previous order.');
@@ -598,15 +612,13 @@ export function init(api) {
   }
 
   async function refreshInbox() {
-    try {
-      inboxThoughts = (await api.workspace.inbox(api.session.journey.id)).filter(c => c.kind === 'note');
-    } catch { inboxThoughts = []; }
+    try { inboxThoughts = (await api.workspace.inbox(api.session.journey.id)).filter(c => c.kind === 'note'); } catch { inboxThoughts = []; }
     if (api.tab === 'outline') renderOutline();
   }
 
   function addJots() {
     const placed = new Set(api.board.nodes.map(n => n.sourceCaptureId).filter(Boolean));
-    const fresh = inboxThoughts.filter(c => !placed.has(c.id)).sort((a, b) => a.capturedAt - b.capturedAt);
+    const fresh = inboxThoughts.filter(c => !placed.has(c.id)).sort((a, c) => a.capturedAt - c.capturedAt);
     change(t => {
       let ord = Math.max(0, ...t.kids(null).map(n => n.ord + 1));
       for (const c of fresh) {
@@ -617,22 +629,6 @@ export function init(api) {
     }, null);
   }
 
-  // Reading direction, shared by the outline and the spatial board.
-  document.querySelector('.board-bar .tabs')?.insertAdjacentHTML('afterend', `<div class="ol-framing" role="group" aria-label="Read the argument">
-    <button type="button" data-framing="answer" title="The point first, then what backs it up: “Y because X”">Answer first</button>
-    <button type="button" data-framing="build" title="Reasons first, leading to the point: “X, and so Y”">Build up</button></div>`);
-  const syncFraming = () => document.querySelectorAll('[data-framing]').forEach(b => b.setAttribute('aria-pressed', String((api.board.framing === 'build') === (b.dataset.framing === 'build'))));
-  api.onRender(syncFraming);
-  document.addEventListener('click', e => {
-    const f = e.target.closest('[data-framing]');
-    if (!f || api.board.framing === f.dataset.framing || (!api.board.framing && f.dataset.framing === 'answer')) return;
-    flushText();
-    api.board.framing = f.dataset.framing;
-    needsLayout = true; layout(false);
-    api.persist(); api.render();
-  });
-
-  // Empty-board shortcut and cross-tab jot notifications.
   document.addEventListener('click', e => { if (e.target.closest('[data-open-outline]')) { focus = { id: 'jot' }; api.setTab('outline'); } });
   globalThis.chrome?.runtime?.onMessage?.addListener(msg => { if (msg.type === 'trail-updated' && msg.journeyId === api.session.journey.id) refreshInbox(); });
   refreshInbox();
