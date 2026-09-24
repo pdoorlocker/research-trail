@@ -15,10 +15,8 @@ const TYPES = [['note', 'Thought'], ['fact', 'Fact'], ['claim', 'Claim'], ['conc
 // A later line arguing the same way as an earlier sibling reads as a
 // continuation ("and because", "but also"); nothing extra is stored.
 const stanceOf = kind => kind === 'challenges' ? 'against' : kind === 'questions' ? 'question' : 'for';
-const connective = (type, kind, again = false) => kind === 'challenges'
-  ? (type === 'evidence' ? (again ? 'but the source also says' : 'but the source says') : (again ? 'but also' : 'but'))
-  : type === 'gap' ? (again ? 'which also raises the question' : 'which raises the question')
-  : (again ? 'and ' : '') + (type === 'evidence' ? 'as the source says' : 'because');
+const SO = /^(and so|so|thus|therefore|ergo),?\s/i;
+
 // Extra connections, phrased from each end.
 const ALSO_OUT = { reasoning: 'is also a reason why', supports: 'is also a source for', challenges: 'also pushes back on', questions: 'is also an open question for' };
 const ALSO_IN = { reasoning: 'also because', supports: 'as another source says', challenges: 'but also', questions: 'which also raises the question' };
@@ -31,7 +29,9 @@ export function init(api) {
   const esc = api.esc;
   let focus = null;          // { id, offset } to restore after a re-render
   let pending = null, timer = 0; // debounced text edit { id, value }
-  let needsLayout = false, laying = false, dragId = null, inboxThoughts = [];
+  // Cards that were never placed by hand get laid out the first time the
+  // board is shown, not only after an outline edit.
+  let needsLayout = api.board.nodes.some(n => n.auto), laying = false, dragId = null, inboxThoughts = [];
 
   // ---------- Model ----------
 
@@ -149,7 +149,34 @@ export function init(api) {
     });
   }
 
+  const building = () => api.board.framing === 'build';
+
+  // Build up: this line becomes a reason for the next line at its level.
+  function indentBuild(id) {
+    change(t => {
+      const n = api.get(id), siblings = t.kids(t.parentOf.get(id) ?? null), next = siblings[siblings.indexOf(n) + 1];
+      if (!next) return false;
+      setParent(id, next.id, t);
+      const kids = t.kids(next.id).filter(k => k.id !== id);
+      n.ord = kids.length ? kids.at(-1).ord + 1 : 0;
+    }, { id, offset: caretOffset() });
+  }
+
+  // Build up: "so …" turns the reasons written just above into reasons for
+  // this line (the run of plain lines since the last conclusion drawn).
+  function reasonsAbove(id, t = tree()) {
+    const siblings = t.kids(t.parentOf.get(id) ?? null), run = [];
+    for (let j = siblings.indexOf(api.get(id)) - 1; j >= 0 && !t.kids(siblings[j].id).length; j--) run.unshift(siblings[j]);
+    return run;
+  }
+  function gather(id, offset = 0) {
+    if (!reasonsAbove(id).length) { api.notify('Write the reasons first, then start the next line with “so”.'); return false; }
+    change(t => { reasonsAbove(id, t).forEach((r, k) => { setParent(r.id, id, t); r.ord = k; }); }, { id, offset });
+    return true;
+  }
+
   function indent(id) {
+    if (building()) return indentBuild(id);
     change(t => {
       const n = api.get(id), siblings = t.kids(t.parentOf.get(id) ?? null), i = siblings.indexOf(n);
       if (i < 1) return false;
@@ -161,12 +188,14 @@ export function init(api) {
   }
 
   function outdent(id) {
+    if (building() && !tree().parentOf.get(id)) return gather(id, caretOffset());
     change(t => {
       const parent = t.parentOf.get(id);
       if (!parent) return false;
       const grand = t.parentOf.get(parent) ?? null, siblings = t.kids(grand), p = api.get(parent);
       setParent(id, grand, t);
-      api.get(id).ord = orderBetween(siblings, siblings.indexOf(p) + 1);
+      // Build up shows reasons above what they lead to, so step out upwards.
+      api.get(id).ord = orderBetween(siblings, siblings.indexOf(p) + (building() ? 0 : 1));
     }, { id, offset: caretOffset() });
   }
 
@@ -221,8 +250,12 @@ export function init(api) {
   // hand-arranged tree are placed once beside their parent, then left alone.
   function layout(measured) {
     const t = tree(), b = api.board;
-    const allAuto = n => n.auto && t.kids(n.id).every(allAuto);
-    const manual = b.nodes.filter(n => !n.auto);
+    // A tree is laid out tidily when its top card was never placed by hand;
+    // cards inside it that you did place keep their spot.
+    const managed = new Set();
+    const collect = n => { managed.add(n.id); t.kids(n.id).forEach(collect); };
+    t.kids(null).filter(r => r.auto).forEach(collect);
+    const manual = b.nodes.filter(n => !n.auto && !managed.has(n.id));
     let top = manual.length ? Math.max(...manual.map(n => n.y + (measured ? height(n) : estimate(n)))) + TREE_GAP : 100;
     let changed = false;
     const put = (n, x, y) => { x = Math.round(x); y = Math.round(y); if (n.x !== x || n.y !== y) { n.x = x; n.y = y; changed = true; } };
@@ -230,13 +263,13 @@ export function init(api) {
     const depthOf = n => 1 + Math.max(0, ...t.kids(n.id).map(depthOf));
     const placed = new Set();
     for (const root of t.kids(null)) {
-      if (!allAuto(root)) continue;
+      if (!root.auto) continue;
       const depth = depthOf(root) - 1;
       const place = (n, d, y) => {
         placed.add(n.id);
         let cursor = y;
         for (const k of t.kids(n.id)) cursor = place(k, d + 1, cursor) + GAP_Y;
-        put(n, 30 + (depth - d) * COL, y);
+        if (n.auto) put(n, 30 + (depth - d) * COL, y);
         return Math.max(y + h(n), t.kids(n.id).length ? cursor - GAP_Y : 0);
       };
       top = place(root, 0, top) + TREE_GAP;
@@ -252,6 +285,9 @@ export function init(api) {
     }
     return changed;
   }
+
+  // Cards placed from elsewhere (e.g. dropped from the inbox) ask to be laid out.
+  api.requestLayout = () => { needsLayout = true; };
 
   // After the spatial board renders, re-run the layout with real card sizes.
   api.onRender(() => {
@@ -275,6 +311,7 @@ export function init(api) {
       incomingExtra.get(l.to).push(l);
     }
     const hasSource = id => b.links.some(l => l.to === id && l.kind === 'supports' && api.get(l.from)?.type === 'evidence');
+    const build = b.framing === 'build';
     const row = n => {
       const parent = t.parentOf.get(n.id), rel = t.primary.get(n.id)?.kind;
       const siblings = parent ? t.kids(parent) : [];
@@ -284,23 +321,27 @@ export function init(api) {
         : n.type === 'conclusion' && !kids.length && !b.links.some(l => l.to === n.id) ? 'no reasons yet'
         : n.type === 'evidence' && !n.url ? 'add where this is from' : '';
       const extras = [
-        ...b.links.filter(l => l.from === n.id && t.primary.get(n.id) !== l).map(l => [l.to, ALSO_OUT[l.kind]]),
-        ...(incomingExtra.get(n.id) || []).map(l => [l.from, ALSO_IN[l.kind]]),
+        ...b.links.filter(l => l.from === n.id && t.primary.get(n.id) !== l).map(l => [l.to, ALSO_OUT[l.kind], l.id]),
+        ...(incomingExtra.get(n.id) || []).map(l => [l.from, ALSO_IN[l.kind], l.id]),
       ].filter(([id]) => api.get(id));
+      const childBlock = kids.length ? `<ul class="ol-children">${kids.map(row).join('')}</ul>` : '';
       return `<li class="ol-item" data-id="${esc(n.id)}">
+        ${build ? childBlock : ''}
         <div class="ol-row" data-row="${esc(n.id)}">
           <span class="ol-grip" draggable="true" data-grip="${esc(n.id)}" title="Drag onto another line to put it underneath">⠿</span>
           <select class="ol-type type-${esc(n.type)}" data-type="${esc(n.id)}" aria-label="Kind of line">${TYPES.map(([v, l]) => `<option value="${v}" ${v === n.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          ${parent ? (n.type === 'gap'
-            ? `<span class="ol-rel is-fixed">${connective(n.type, rel, again)}</span>`
-            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? 'Pushes back on the line above. Click to make it support it instead.' : 'Supports the line above. Click to make it push back instead.'}">${connective(n.type, rel, again)}</button>`) : ''}
+          ${parent && !(build && kids.length) ? (n.type === 'gap'
+            ? `<span class="ol-rel is-fixed">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</span>`
+            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? `Pushes back on the line ${build ? 'it leads to' : 'above'}. Click to make it support it instead.` : `Supports the line ${build ? 'it leads to' : 'above'}. Click to make it push back instead.`}">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</button>`) : ''}
+          ${build && kids.length ? `<span class="ol-rel is-fixed is-lead ${rel === 'challenges' ? 'rel-challenges' : ''}" ${rel === 'challenges' ? 'title="This conclusion pushes back on the one it leads to"' : ''}>${kids.some(k => stanceOf(t.primary.get(k.id)?.kind) === 'for') ? 'and so' : kids.some(k => t.primary.get(k.id)?.kind === 'challenges') ? 'still,' : ''}</span>` : ''}
           <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : 'Type a thought…'}">${esc(textOf(n))}</div>
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
+          ${n.type === 'conclusion' ? (api.mainConclusion()?.id === n.id ? '<span class="ol-answer">answers the question</span>' : api.isInterim(n) ? '<span class="ol-source">interim</span>' : '') : ''}
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
-        ${extras.length ? `<div class="ol-extras">${extras.map(([id, label]) => `<button data-goto="${esc(id)}">${esc(label)} ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o) || o.text, 60)) + '”' : esc(clip(o.text, 60)))(api.get(id))}</button>`).join('')}</div>` : ''}
-        ${kids.length ? `<ul class="ol-children">${kids.map(row).join('')}</ul>` : ''}
+        ${extras.length ? `<div class="ol-extras">${extras.map(([id, label, linkId]) => `<button data-goto="${esc(id)}" data-link="${esc(linkId)}">${esc(label)} ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o) || o.text, 60)) + '”' : esc(clip(o.text, 60)))(api.get(id))}</button>`).join('')}</div>` : ''}
+        ${build ? '' : childBlock}
       </li>`;
     };
     const title = b.title === DEFAULT_TITLE ? '' : b.title;
@@ -310,16 +351,48 @@ export function init(api) {
       <div class="ol-shell">
         <label class="ol-label" for="ol-title">Question</label>
         <input id="ol-title" class="ol-title" value="${esc(title)}" placeholder="What are you trying to figure out? (optional, add it later)">
+        <div class="ol-framing" role="group" aria-label="Read the outline">
+          <button type="button" data-framing="answer" aria-pressed="${!build}" title="Each line is followed by what backs it up: “Y because X”">Answer first</button>
+          <button type="button" data-framing="build" aria-pressed="${build}" title="Reasons come first and lead to what follows: “X, and so Y”">Build up</button>
+        </div>
         ${unplaced.length ? `<div class="ol-inbox"><span>${unplaced.length} thought${unplaced.length === 1 ? '' : 's'} jotted from the side panel</span><button data-add-jots>Add to outline</button></div>` : ''}
-        <ul class="ol-tree" aria-label="Outline">${roots.map(row).join('')}</ul>
+        <div class="ol-tree-wrap"><ul class="ol-tree ${build ? 'is-build' : ''}" aria-label="Outline">${roots.map(row).join('')}</ul><svg class="ol-arrows" aria-hidden="true"></svg></div>
         ${roots.length ? '' : '<p class="ol-empty">Nothing here yet. Write whatever you already know or suspect, one thought per line. Sort it out afterwards.</p>'}
         <div class="ol-drop-root" data-drop-root>Drop here to move a line to the top level</div>
         <form class="ol-jot" id="ol-jot-form"><input id="ol-jot" placeholder="Jot a thought and press Enter" autocomplete="off" aria-label="Jot a thought"><button class="dark">Add</button></form>
-        <p class="ol-keys"><kbd>Tab</kbd> put under the line above · <kbd>⇧ Tab</kbd> move out · <kbd>Alt ↑↓</kbd> reorder · start a line with <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you <kbd>~</kbd> pushback</p>
+        <p class="ol-keys">${build ? '<kbd>Tab</kbd> make it a reason for the line below · start a line with <kbd>so</kbd> to draw a conclusion from the lines above ·' : '<kbd>Tab</kbd> put under the line above · <kbd>⇧ Tab</kbd> move out ·'} <kbd>Alt ↑↓</kbd> reorder · start a line with <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you <kbd>~</kbd> pushback</p>
         ${roots.length > 1 || roots.some(r => t.kids(r.id).length) ? '<div class="ol-actions"><button data-order-from-outline title="Reasons first, then what they lead to">Use this order for the walkthrough</button><button data-tidy>Re-arrange the board from this outline</button></div>' : ''}
       </div>`;
     restoreFocus();
+    drawArrows();
   }
+
+  // Extra connections (beyond the outline's nesting) drawn as arrows in the
+  // right margin, from the supporting line to the line it supports.
+  function drawArrows() {
+    const wrap = view.querySelector('.ol-tree-wrap'), svg = wrap?.querySelector('.ol-arrows');
+    if (!svg) return;
+    const t = tree(), box = wrap.getBoundingClientRect();
+    const links = api.board.links.filter(l => t.primary.get(l.from) !== l);
+    let lane = 0;
+    const paths = links.map(l => {
+      const a = wrap.querySelector(`[data-row="${CSS.escape(l.from)}"]`), c = wrap.querySelector(`[data-row="${CSS.escape(l.to)}"]`);
+      if (!a || !c) return '';
+      const ra = a.getBoundingClientRect(), rc = c.getBoundingClientRect();
+      const y1 = ra.top - box.top + Math.min(16, ra.height / 2), y2 = rc.top - box.top + Math.min(16, rc.height / 2);
+      const edge = box.width + 4, out = edge + 16 + (lane++ % 3) * 9;
+      return `<path class="k-${esc(l.kind)}" data-arrow="${esc(l.id)}" d="M${edge},${y1} C${out},${y1} ${out},${y2} ${edge + 3},${y2}" marker-end="url(#ol-head)"/>`;
+    }).join('');
+    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${paths}`;
+  }
+  new ResizeObserver(() => { if (api.tab === 'outline') drawArrows(); }).observe(view);
+  view.addEventListener('mouseover', e => {
+    const ref = e.target.closest('[data-link]');
+    view.querySelectorAll('.is-hot').forEach(el => el.classList.remove('is-hot'));
+    if (!ref) return;
+    view.querySelector(`[data-arrow="${CSS.escape(ref.dataset.link)}"]`)?.classList.add('is-hot');
+    view.querySelector(`[data-row="${CSS.escape(ref.dataset.goto)}"]`)?.classList.add('is-hot');
+  });
 
   const clip = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
   const hostname = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -354,6 +427,12 @@ export function init(api) {
     if (!el) return;
     const id = el.dataset.text, n = api.get(id);
     let value = el.textContent;
+    if (building() && SO.test(value) && reasonsAbove(id).length) {
+      pending = { id, value: value.replace(SO, '') };
+      flushText();
+      return gather(id, 0);
+    }
+    requestAnimationFrame(drawArrows);
     const prefix = readPrefix(value);
     if (prefix && (n.type === 'note' || prefix.kind === 'challenge')) {
       pending = { id, value: prefix.rest };
@@ -425,13 +504,23 @@ export function init(api) {
     const prefix = readPrefix(raw + ' ');
     const type = prefix && prefix.kind !== 'challenge' ? prefix.kind : 'note';
     const text = prefix ? prefix.rest.trim() : raw;
-    addLine(null, text, type);
+    if (building() && SO.test(raw)) {
+      addLine(null, raw.replace(SO, '').trim(), type);
+      const last = tree().kids(null).at(-1);
+      if (last) gather(last.id);
+    } else addLine(null, text, type);
     focus = { id: 'jot' };
     renderOutline();
   });
 
   view.addEventListener('click', e => {
     const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]'), stance = e.target.closest('[data-stance]');
+    const framing = e.target.closest('[data-framing]');
+    if (framing) {
+      api.board.framing = framing.dataset.framing;
+      api.persist(); api.render();
+      return;
+    }
     if (stance) {
       const id = stance.dataset.stance;
       change(t => { const l = t.primary.get(id); l.kind = l.kind === 'challenges' ? kindFor(api.get(id)) : 'challenges'; }, null);
@@ -508,5 +597,6 @@ export function init(api) {
   document.addEventListener('click', e => { if (e.target.closest('[data-open-outline]')) { focus = { id: 'jot' }; api.setTab('outline'); } });
   globalThis.chrome?.runtime?.onMessage?.addListener(msg => { if (msg.type === 'trail-updated' && msg.journeyId === api.session.journey.id) refreshInbox(); });
   refreshInbox();
+  if (needsLayout && api.tab === 'map') api.render();
   if (api.tab === 'outline') { focus = focus || { id: 'jot' }; renderOutline(); }
 }

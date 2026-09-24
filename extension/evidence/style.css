@@ -122,3 +122,48 @@
 .ol-rel:hover,.ol-rel:focus-visible{color:var(--ink)!important;border-bottom-style:solid!important}
 .ol-rel,.ol-type{field-sizing:content}.ol-rel{margin-right:-2px}
 .ol-rel{min-height:0!important;cursor:pointer;line-height:1.5}.ol-rel.is-fixed{cursor:default;border-bottom:0!important}
+/* Outline framing switch and extra-connection arrows */
+.ol-framing{display:inline-flex;gap:2px;margin:14px 0 0;padding:2px;border:1px solid var(--border,#cfc7b6);border-radius:7px}
+.ol-framing button{min-height:0!important;padding:3px 10px!important;border:0!important;border-radius:5px!important;background:transparent!important;font-size:12px;color:var(--muted)}
+.ol-framing button[aria-pressed=true]{background:var(--surface-inset,#ece7db)!important;color:var(--ink)}
+.ol-tree-wrap{position:relative}
+.ol-arrows{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.ol-arrows path{fill:none;stroke:var(--muted);stroke-width:1.4;opacity:.75}
+.ol-arrows path.k-supports{stroke-dasharray:2 4}.ol-arrows path.k-challenges{stroke:var(--red);stroke-dasharray:6 4}.ol-arrows path.k-questions{stroke-dasharray:6 4}
+.ol-arrows path.is-hot{stroke-width:2.4;opacity:1}
+.ol-row.is-hot{background:var(--accent-soft,#e4ede5)}
+.ol-extras button::before{content:'↪ ';text-decoration:none;display:inline-block}
+.ol-rel.is-lead{color:var(--green)!important;font-style:italic}
+.ol-rel.is-lead:empty{display:none}
+/* Drag-to-connect handle and preview */
+.connect-handle{position:absolute;right:-13px;top:22px;width:26px;height:26px;min-height:0!important;padding:0!important;border-radius:50%!important;border:1px solid var(--green)!important;background:var(--card)!important;color:var(--green);font-size:13px;line-height:1;cursor:crosshair;opacity:0;transition:opacity .15s;z-index:2}
+.card:hover .connect-handle,.card:focus-within .connect-handle,.card.selected .connect-handle{opacity:1}
+.connect-preview{fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:5 4}
+.card.connect-target{outline:2px solid var(--green);outline-offset:4px}
+.walk-so{margin:0 0 4px;font:italic 18px var(--serif);color:var(--green)}
+.ol-answer{flex:none;font:500 10.5px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--green);border:1px solid var(--green);border-radius:10px;padding:0 7px}
+/* Evidence inbox side panel */
+#inbox-panel input[type=search]{width:100%;margin:4px 0 8px}
+.inbox-toggle{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px}
+.inbox-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:10px}
+.inbox-card{padding:11px 12px;border:1px solid var(--border,#cfc7b6);border-radius:8px;background:var(--paper);cursor:grab}
+.inbox-card:active{cursor:grabbing}
+.inbox-card.is-used{opacity:.6}
+.inbox-card .inbox-meta{margin:0 0 4px;font:11px var(--mono);color:var(--muted)}
+.inbox-card .inbox-title{margin:0;font-size:12.5px;color:var(--muted)}
+.inbox-card .inbox-thought{margin:0;font:15px/1.45 var(--serif);color:var(--ink)}
+.inbox-card blockquote{margin:6px 0 0;padding-left:9px;border-left:3px solid var(--yellow,#f2e39d);font:14.5px/1.45 var(--serif);color:var(--ink)}
+.inbox-card button{margin-top:8px;font-size:12px;min-height:0;padding:3px 10px}
+body.is-dropping-evidence #viewport,body.is-dropping-evidence #outline-view .ol-tree-wrap{outline:2px dashed var(--green);outline-offset:-6px}
+#inbox-button[aria-pressed=true]{border-color:var(--green);color:var(--green)}
+.edge-label.k-challenges{fill:var(--red)}
+.relation-word{font:italic 14px var(--serif);color:var(--muted)}.relation-word.is-against,.walk-relation.is-against{color:var(--red)}
+.walk-relation{margin:14px 0 6px;font:italic 16px var(--serif);color:var(--muted)}
+.legend em{font-family:var(--serif)}
+/* Resizable side panel */
+.splitter{flex:none;width:7px;margin:0 -3px;z-index:3;cursor:col-resize;position:relative;background:transparent}
+.splitter::after{content:'';position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--rule)}
+.splitter:hover::after,.splitter:focus-visible::after,body.is-resizing .splitter::after{width:3px;left:2px;background:var(--green)}
+body.is-resizing{cursor:col-resize;user-select:none}
+@media(min-width:761px){main>aside{width:var(--side-w,340px)}main.side-collapsed>aside{display:none}}
+@media(max-width:760px){.splitter{display:none}}
