@@ -94,7 +94,7 @@ export function init(api) {
     // Refs: K = on the board, S = inbox passages not yet placed.
     board.nodes.slice(0, 120).forEach((n, i) => refs.set('K' + (i + 1), { kind: 'card', id: n.id, type: n.type, text: n.text, quote: n.quote }));
     const placed = new Set(board.nodes.map(n => n.sourceCaptureId).filter(Boolean));
-    captures.filter(c => !placed.has(c.id) && c.kind !== 'note').slice(0, 30).forEach((c, i) => refs.set('S' + (i + 1), { kind: 'capture', capture: c, type: 'evidence', text: c.title, quote: c.quote }));
+    captures.filter(c => !placed.has(c.id) && c.kind !== 'note' && !c.archived).slice(0, 30).forEach((c, i) => refs.set('S' + (i + 1), { kind: 'capture', capture: c, type: 'evidence', text: c.title, quote: c.quote }));
     const refOf = id => [...refs].find(([, v]) => v.id === id)?.[0];
 
     const lines = [`QUESTION: ${board.title}`, board.subtitle ? `CONTEXT: ${board.subtitle}` : '', '', 'ON THE BOARD:'];

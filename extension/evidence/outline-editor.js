@@ -705,7 +705,7 @@ export function init(api) {
   }
 
   async function refreshInbox() {
-    try { inboxThoughts = (await api.workspace.inbox(api.session.journey.id)).filter(c => c.kind === 'note'); } catch { inboxThoughts = []; }
+    try { inboxThoughts = (await api.workspace.inbox(api.session.journey.id)).filter(c => c.kind === 'note' && !c.archived); } catch { inboxThoughts = []; }
     if (api.tab === 'outline') renderOutline();
   }
 

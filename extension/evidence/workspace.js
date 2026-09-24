@@ -50,7 +50,7 @@ export async function inbox(journeyId) {
   const legacy = pages.flatMap(page => (page.highlights || []).map((h, index) => [h, index]).filter(([h]) => !h.captureId).map(([h, index]) => ({
     id: `highlight:${page.id}:${index}:${h.at}`, journeyId, pageId: page.id,
     title: page.title || page.url, url: page.url, quote: h.text,
-    capturedAt: h.at, legacy: true, view: 'legacy-unverified',
+    capturedAt: h.at, legacy: true, view: 'legacy-unverified', archived: !!h.archived,
     note: 'Existing highlight: original/translated view and exact page anchor were not recorded. Verify against the source.',
   })));
   return [...captures, ...legacy].sort((a, b) => b.capturedAt - a.capturedAt);
@@ -93,4 +93,51 @@ export async function saveJot(journeyId, text, page = {}) {
 // chrome.storage, and losing "resume" must never break the board.
 export async function rememberView(url, info) {
   try { if (globalThis.chrome?.storage) await opener.rememberView(url, info); } catch { /* not critical */ }
+}
+
+// ---------- Inbox housekeeping and the browsing trail as a source ----------
+// Inbox items can be archived (hidden, restorable) or deleted. Evidence
+// cards on a board keep their own copy, so neither affects an argument.
+// Older trail highlights are addressed as "highlight:<pageId>:<index>:<at>".
+const highlightRef = id => { const [, pageId, , at] = id.split(':'); return { pageId, at }; };
+
+export async function setArchived(id, archived) {
+  if (id.startsWith('highlight:')) {
+    const { pageId, at } = highlightRef(id);
+    return db.update('nodes', pageId, n => ({ ...n, highlights: (n.highlights || []).map(h => String(h.at) === at ? { ...h, archived: archived || undefined } : h) }));
+  }
+  return db.update('evidenceCaptures', id, c => ({ ...c, archived: archived || undefined }));
+}
+
+export async function deleteFromInbox(id) {
+  if (id.startsWith('highlight:')) {
+    const { pageId, at } = highlightRef(id);
+    return db.update('nodes', pageId, n => ({ ...n, highlights: (n.highlights || []).filter(h => String(h.at) !== at) }));
+  }
+  const capture = await db.get('evidenceCaptures', id);
+  await db.remove('evidenceCaptures', id);
+  // Its record on the trail page goes too.
+  if (capture?.pageId && await db.get('nodes', capture.pageId)) {
+    await db.update('nodes', capture.pageId, n => ({ ...n, highlights: (n.highlights || []).filter(h => h.captureId !== id) }));
+  }
+}
+
+export const trailPages = journeyId => db.getByIndex('nodes', 'byJourney', journeyId);
+
+const lastVisit = page => page.visits?.at(-1)?.at || page.createdAt || 0;
+export { lastVisit };
+
+// A passage picked from the text saved when a page was visited, without
+// reopening it. Anchored in that text; flagged as possibly out of date.
+export async function savePickedPassage(journeyId, page, quote, prefix = '', suffix = '') {
+  const when = lastVisit(page);
+  const capture = {
+    id: crypto.randomUUID(), journeyId, pageId: page.id, url: page.url, frameUrl: page.url,
+    title: page.title || page.url, quote, capturedAt: Date.now(), view: 'saved-text',
+    anchor: { exact: quote, prefix, suffix },
+    note: `Picked from the page text saved when you visited${when ? ' on ' + new Date(when).toLocaleDateString() : ''}. The live page may have changed since.`,
+  };
+  await db.put('evidenceCaptures', capture);
+  await db.update('nodes', page.id, n => ({ ...n, highlights: [...(n.highlights || []), { text: quote, at: capture.capturedAt, captureId: capture.id }] }));
+  return capture;
 }

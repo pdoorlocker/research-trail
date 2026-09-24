@@ -252,3 +252,19 @@ body.space-pan #viewport{cursor:grab!important}
 /* In Author mode cards are drag handles, so their text isn't selectable. */
 #canvas .card.is-editable{user-select:none;-webkit-user-select:none}
 #canvas .card.is-editable a{user-select:auto}
+/* Inbox: tabs, housekeeping, the trail as a source */
+.inbox-tabs{display:flex;gap:2px;margin:4px 0 12px;padding:2px;border:1px solid var(--border);border-radius:7px}
+.inbox-tabs button{flex:1;min-height:0!important;padding:4px 8px!important;border:0!important;border-radius:5px!important;background:transparent!important;font-size:12.5px;color:var(--muted)}
+.inbox-tabs button[aria-selected=true]{background:var(--surface-inset)!important;color:var(--ink)}
+.inbox-toggles{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.inbox-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.inbox-actions button{margin:0!important}
+.inbox-quiet{border:0!important;background:transparent!important;padding:2px 4px!important;min-height:0!important;font-size:12px;color:var(--muted)}
+.inbox-quiet:hover{color:var(--ink);text-decoration:underline}
+.inbox-card.is-archived{opacity:.75;cursor:default;border-style:dashed}
+.inbox-page-title{margin:0;font:500 15px/1.35 var(--serif);color:var(--ink)}
+.inbox-snippet{margin:5px 0 0;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.inbox-snippet mark{background:var(--yellow);color:var(--ink)}
+.reader-text{margin:8px 0;padding:10px 12px;max-height:48vh;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--paper);font:15px/1.6 var(--serif);color:var(--ink);user-select:text}
+.reader-text p{margin:0 0 10px}
+.reader-text ::selection{background:var(--yellow);color:var(--ink)}
+.reader-bar{position:sticky;bottom:0;padding:6px 0;background:var(--card)}
