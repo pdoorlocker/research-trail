@@ -244,3 +244,8 @@ select.pick-native{position:absolute!important;opacity:0!important;pointer-event
 .add-menu-list[hidden]{display:none}
 .add-menu-list button{text-align:left;border:0!important;background:transparent!important;padding:7px 10px!important;border-radius:5px!important;font:15px var(--serif);color:var(--ink);min-height:0!important}
 .add-menu-list button:hover,.add-menu-list button:focus-visible{background:var(--accent-soft)!important;outline:none}
+/* Canvas multi-select */
+.marquee{position:absolute;z-index:5;border:1.5px dashed var(--green);background:color-mix(in srgb,var(--green) 10%,transparent);pointer-events:none;border-radius:3px}
+body:not(.space-pan) #viewport:has(.card.is-editable){cursor:default}
+body.space-pan #viewport{cursor:grab!important}
+.multi-list{list-style:none;padding:0;margin:10px 0;display:grid;gap:6px;font-size:13px}
