@@ -185,6 +185,22 @@ function download(name,content,type='application/json'){const a=document.createE
 const filename=()=>board.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,65)||'evidence-board';
 $('.top-actions').insertAdjacentHTML('afterbegin','<button id="new-board">＋ New board</button>');
 $('#authorbar').insertAdjacentHTML('afterbegin','<button id="add-fact">＋ Fact</button>');
+// One "+ Add" menu instead of a row of add buttons. The original buttons move
+// into it, so their handlers and ids are unchanged.
+{const bar=$('#authorbar');if(bar&&!readerMode){
+ bar.insertAdjacentHTML('afterbegin','<div class="add-menu"><button id="add-toggle" aria-haspopup="menu" aria-expanded="false">＋ Add <span aria-hidden="true">▾</span></button><div class="add-menu-list" role="menu" hidden></div></div>');
+ const list=bar.querySelector('.add-menu-list'),toggle=$('#add-toggle');
+ const extra=(id,label,type)=>{const b=document.createElement('button');b.id=id;b.textContent=label;b.onclick=()=>openCard(type);return b};
+ const items=[extra('add-note','Thought','note'),$('#add-fact'),$('#add-claim'),extra('add-conclusion','Conclusion','conclusion'),$('#add-gap'),$('#add-source')].filter(Boolean);
+ const labels={'add-fact':'Fact','add-claim':'Claim','add-gap':'Open question','add-source':'Evidence · a quote or screenshot'};
+ for(const b of items){if(labels[b.id])b.textContent=labels[b.id];b.setAttribute('role','menuitem');b.tabIndex=-1;list.append(b)}
+ const setOpen=v=>{list.hidden=!v;toggle.setAttribute('aria-expanded',String(v));if(v)items[0].focus()};
+ toggle.onclick=()=>setOpen(list.hidden);
+ toggle.addEventListener('keydown',e=>{if(e.key==='ArrowDown'){e.preventDefault();setOpen(true)}});
+ list.addEventListener('click',e=>{if(e.target.closest('[role=menuitem]'))setOpen(false)});
+ list.addEventListener('keydown',e=>{const i=items.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length].focus()}else if(e.key==='Escape'){e.preventDefault();setOpen(false);toggle.focus()}else if(e.key==='Tab')setOpen(false)});
+ document.addEventListener('mousedown',e=>{if(!list.hidden&&!e.target.closest('.add-menu'))setOpen(false)});}}
+
 $('#authorbar').insertAdjacentHTML('beforeend','<button id="layout-spacing">↔ Spacing</button><button id="order-steps">Order steps</button><button id="undo" aria-label="Undo change">↶</button><button id="redo" aria-label="Redo change">↷</button>');
 $('#new-board').onclick=async()=>{
   await saveQueue;if(saveBlocked){notify('Save your board file and reload before switching boards.');return;}
@@ -269,7 +285,7 @@ function spacedPositions(nodes,gapX,gapY){
  return result;
 }
 $('#layout-spacing').onclick=openSpacing;
-function openTitle(){showEditor('Your question',input('title-text','Question or board title',board.title,'text',true)+area('subtitle-text','Context or scope',board.subtitle),'title')}
+function openTitle(){showEditor('Your base question',input('title-text','The question this board answers',board.title,'text',true)+area('subtitle-text','Context or scope',board.subtitle),'title')}
 $('#edit-title').onclick=openTitle;$('#edit-heading').onclick=openTitle;
 for(const el of [$('#board-title'),$('.subtitle'),$('#verdict')]){
  const edit=()=>{if(!author||readerMode)return;if(el.id==='verdict'){const n=mainConclusion();if(n)activateCard(n.id)}else openTitle()};

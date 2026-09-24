@@ -50,7 +50,7 @@ export function init(api) {
   const $ = s => document.querySelector(s), esc = api.esc;
   const bar = $('#authorbar');
   if (!bar) return;
-  bar.querySelector('span:last-of-type')?.insertAdjacentHTML('beforebegin', '<button id="assist-open" title="Optional: let a local model propose cards and connections for you to review">✦ Draft with local AI</button>');
+  bar.querySelector(':scope > span:last-of-type')?.insertAdjacentHTML('beforebegin', '<button id="assist-open" title="Optional: let a local model propose cards and connections for you to review">✦ Draft with local AI</button>');
   if (!$('#assist-open')) bar.insertAdjacentHTML('beforeend', '<button id="assist-open">✦ Draft with local AI</button>');
 
   let run = null; // { controller, refs, proposals, captures, summary }
