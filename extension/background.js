@@ -1,6 +1,7 @@
 import { captureEvidence } from './evidence/capture-background.js';
 import { openBoard, resumeBoard, reopenAfterReload, forgetTab } from './evidence/open.js';
 import { showCaptureToast } from './evidence/capture-toast.js';
+import { evidenceCard, noteCard, saveBoard } from './evidence/workspace.js';
 // Research Trail — background service worker.
 //
 // Responsibilities:
@@ -862,6 +863,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       warning: capture.view === 'translated' ? 'Saved from the translated view: switch to the original wording to link to the exact passage.' : capture.view === 'legacy-unverified' ? 'The exact wording couldn’t be checked on this page.' : '',
       moveTo: target.alternative };
   } catch (error) {
+    if (error.cancelled) return;
     toast = { journeyId: target.journeyId, error: error.message };
   }
   try {
@@ -871,6 +873,45 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await openBoard({ j: target.journeyId }, toast.error ? { inbox: '1', captureError: toast.error } : { inbox: '1' });
   }
 });
+
+// Attach a captured passage under a line of a board. If the board is open,
+// its tab applies the change (undo works, no save conflict); otherwise the
+// board is updated here.
+async function attachCapture({ captureId, boardId, lineId, word }) {
+  const viaTab = await chrome.runtime.sendMessage({ type: 'attach-capture', captureId, boardId, lineId, word }).catch(() => null);
+  if (viaTab?.ok) return { ok: true };
+  const [record, capture] = await Promise.all([db.get('evidenceBoards', boardId), db.get('evidenceCaptures', captureId)]);
+  if (!record || !capture) throw new Error('That board or passage no longer exists.');
+  const content = structuredClone(record.content), line = content.nodes.find((n) => n.id === lineId);
+  if (!line) throw new Error('That line is no longer on the board.');
+  let card = content.nodes.find((n) => n.sourceCaptureId === capture.id);
+  if (!card) {
+    const at = { x: line.x + 340, y: line.y };
+    card = capture.kind === 'note' ? noteCard(capture, at) : evidenceCard(capture, at);
+    Object.assign(card, { auto: true, ord: Date.now() });
+    content.nodes.push(card);
+  }
+  if (!content.links.some((l) => (l.from === lineId && l.to === card.id) || (l.from === card.id && l.to === lineId))) {
+    // Reads "[line] because [passage]" (or "one objection"; an answer under a question).
+    content.links.push({ id: uid(), from: lineId, to: card.id, word: line.type === 'gap' ? 'answer' : word === 'objection' ? 'objection' : 'because', label: '' });
+  }
+  await saveBoard(boardId, record.revision, content);
+  return { ok: true };
+}
+
+// The lines of a workspace's board a passage can be attached to: the board
+// you last used there, else the most recently edited one.
+async function attachOptions({ journeyId, boardId }) {
+  const boards = await db.getByIndex('evidenceBoards', 'byJourney', journeyId);
+  if (!boards.length) return { lines: [] };
+  const { lastBoardByJourney = {} } = await chrome.storage.local.get('lastBoardByJourney');
+  const board = boards.find((b) => b.id === (boardId || lastBoardByJourney[journeyId])) || boards.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  const c = board.content, order = new Map(c.steps.map((id, i) => [id, i]));
+  const lines = c.nodes.filter((n) => n.type !== 'evidence' && (n.text || '').trim())
+    .sort((a, b) => (order.get(a.id) ?? 1e6) - (order.get(b.id) ?? 1e6) || a.y - b.y || a.x - b.x)
+    .map((n) => ({ id: n.id, type: n.type, text: n.text }));
+  return { boardId: board.id, boardTitle: c.title, lines };
+}
 
 // ---------- Messages ----------
 
@@ -883,6 +924,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleMessage(msg, sender) {
   switch (msg.type) {
+    case 'capture-attach-options':
+      return attachOptions(msg);
+
+    case 'capture-attach':
+      return attachCapture(msg);
+
     case 'capture-toast-open':
       await openBoard({ j: msg.journeyId }, { inbox: '1' });
       return { ok: true };

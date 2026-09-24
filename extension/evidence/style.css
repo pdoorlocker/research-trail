@@ -277,3 +277,15 @@ body.space-pan #viewport{cursor:grab!important}
 .card.evidence > .source-head:first-child{border-top-left-radius:7px;border-top-right-radius:7px}
 .card.evidence > .source-footer:last-child{border-bottom-left-radius:7px;border-bottom-right-radius:7px}
 .card.evidence .crop{border-radius:4px;overflow:hidden}
+/* Source link in the evidence editor */
+.url-view{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card)}
+.url-view a{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--green);font-size:14px}
+.url-view .edit-affordance{margin:0!important;flex:none}
+/* Delete on cards, in the editor, and Undo in the message */
+.card-delete{min-height:0!important;padding:3px 6px!important;border:1px dashed transparent!important;background:transparent!important;color:var(--muted);border-radius:5px!important;line-height:0}
+.card-delete:hover{color:var(--red);border-color:var(--red)!important}
+.editor-delete{margin-right:auto}
+#toast.has-action{pointer-events:auto;display:flex;align-items:center;gap:14px}
+#toast button{min-height:0;padding:3px 10px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font:600 13px var(--sans);cursor:pointer}
+.card-delete{position:absolute;top:9px;right:72px;opacity:0;transition:opacity .15s}
+.card:hover .card-delete,.card:focus-within .card-delete,.card.selected .card-delete{opacity:1}

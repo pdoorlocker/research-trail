@@ -1,6 +1,21 @@
 import * as db from '../lib/db.js';
 import { canonicalUrl, getSettings, isCapturable } from '../lib/util.js';
 import { collectSelection } from './selection.js';
+import { pickRegion } from './region-picker.js';
+
+// Crop a screenshot to the box picked on the page (CSS pixels; the image may
+// be at a higher device pixel ratio, so scale by image width / viewport width).
+async function cropDataUrl(dataUrl, r) {
+  const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const k = bmp.width / r.vw;
+  const w = Math.max(1, Math.round(r.w * k)), h = Math.max(1, Math.round(r.h * k));
+  const canvas = new OffscreenCanvas(w, h);
+  canvas.getContext('2d').drawImage(bmp, Math.round(r.x * k), Math.round(r.y * k), w, h, 0, 0, w, h);
+  const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return 'data:image/png;base64,' + btoa(bin);
+}
 
 export async function captureEvidence(tab, info, journeyId, screenshot = false) {
   if (!tab?.id || tab.incognito) throw new Error('Evidence capture is unavailable for this tab.');
@@ -29,12 +44,19 @@ export async function captureEvidence(tab, info, journeyId, screenshot = false) 
       : !source || (exact && source.quote !== exact) ? 'The original selection could not be revalidated; original wording and page anchor were not verified.' : '',
   };
   if (screenshot) {
+    // Let the reader drag a box around what to save. Pages we can't draw on
+    // fall back to the whole visible page; Esc cancels.
+    let region = { full: true };
+    try { region = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: pickRegion }))[0]?.result ?? { full: true }; } catch { /* restricted page */ }
+    if (region === null) { const cancelled = new Error('Screenshot cancelled.'); cancelled.cancelled = true; throw cancelled; }
+    if (!region.full && !(region.w > 0 && region.h > 0 && region.vw > 0)) region = { full: true };
     const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
     if (active?.id !== tab.id || active.url !== tab.url) throw new Error('Return to the source tab before capturing its screenshot.');
     const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
     const [after] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
     if (after?.id !== tab.id || after.url !== tab.url) throw new Error('The active page changed during capture. Try again.');
-    capture.image = image;
+    if (region.full) capture.image = image;
+    else { capture.image = await cropDataUrl(image, region); capture.originalImage = image; }
   }
   await db.put('evidenceCaptures', capture);
   return capture;

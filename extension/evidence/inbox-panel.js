@@ -147,7 +147,7 @@ export function init(api) {
   }
 
   // Put an item on the board (or reuse its card) and optionally connect it.
-  function place(id, { at, attachTo, fromOutline } = {}) {
+  function place(id, { at, attachTo, fromOutline, word = 'because' } = {}) {
     const capture = findItem(id);
     if (!capture) return;
     const b = api.board;
@@ -167,7 +167,7 @@ export function init(api) {
     let linked = false;
     if (attachTo && attachTo !== card.id && !b.links.some(l => (l.from === attachTo && l.to === card.id) || (l.from === card.id && l.to === attachTo))) {
       // Reads "[target] because [this]" ("as the source says" for a quote).
-      b.links.push({ id: api.uid(), from: attachTo, to: card.id, word: api.fitWord(api.get(attachTo).type, card.type, 'because'), label: '' });
+      b.links.push({ id: api.uid(), from: attachTo, to: card.id, word: api.fitWord(api.get(attachTo).type, card.type, word), label: '' });
       linked = true;
     }
     if (!added && !linked) { api.select(card.id, true); return; }
@@ -265,5 +265,12 @@ export function init(api) {
     if (!reading) draw();
   });
   globalThis.chrome?.runtime?.onMessage?.addListener(msg => { if (msg.type === 'trail-updated' && msg.journeyId === api.session.journey.id) refresh(); });
+  // "Attach…" from a page or the side panel: when this board is open, it
+  // applies the change itself (keeps undo, no save conflict with this tab).
+  globalThis.chrome?.runtime?.onMessage?.addListener((msg, _sender, reply) => {
+    if (msg.type !== 'attach-capture' || msg.boardId !== api.session.record.id || !api.get(msg.lineId)) return;
+    api.workspace.inbox(api.session.journey.id).then(list => { captures = list; place(msg.captureId, { attachTo: msg.lineId, word: msg.word, fromOutline: true }); reply({ ok: true }); draw(); }).catch(() => reply({ ok: false }));
+    return true;
+  });
   if (api.inboxOpen) refresh();
 }

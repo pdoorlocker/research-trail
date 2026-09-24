@@ -66,7 +66,7 @@ export function evidenceCard(capture, position) {
     // The capture's status travels as provenance (shown as a small label),
     // not as boilerplate in the card's note, which is for your own words.
     note: '',
-    image: capture.image || '', originalImage: capture.image || '', highlights: [],
+    image: capture.image || '', originalImage: capture.originalImage || capture.image || '', highlights: [],
     tier: 'Unreviewed', checked: '', capturedAt: capture.capturedAt,
     provenance: { view: capture.view || 'original', anchor: capture.anchor || null, frameUrl: capture.frameUrl || capture.url },
   };
