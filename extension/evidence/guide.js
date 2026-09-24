@@ -73,7 +73,7 @@ const PRIMER = `
 <p class="eyebrow">HOW TO USE IT</p>
 <ol class="primer-steps">
   <li><b>Jot:</b> in the <b>Outline</b> tab (or the side panel while reading), write thoughts one per line, unsorted. Press <b>Tab</b> to put a line under the one above it as a reason for it. Start a line with <b>?</b> for a question, <b>&gt;</b> for a quote, <b>!</b> for a conclusion, <b>-</b> for a fact about you. The spatial board arranges itself to match.</li>
-  <li><b>Collect:</b> while browsing, select text → right-click → <i>Add passage to evidence board</i>. It lands in the <b>Evidence inbox</b>.</li>
+  <li><b>Collect:</b> while browsing, select text → right-click → <i>Save passage as evidence</i>. It lands in the <b>Evidence inbox</b>.</li>
   <li><b>Author:</b> switch to <b>Author</b>, place evidence, write claims, connect cards, and set the <b>Order steps</b>.</li>
   <li><b>Present:</b> <b>▶ Walk through</b> steps through the argument one step at a time, and <b>Export brief</b> saves it as a standalone page to share.</li>
 </ol>

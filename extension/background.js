@@ -1,5 +1,6 @@
 import { captureEvidence } from './evidence/capture-background.js';
 import { openBoard, resumeBoard, reopenAfterReload, forgetTab } from './evidence/open.js';
+import { showCaptureToast } from './evidence/capture-toast.js';
 // Research Trail — background service worker.
 //
 // Responsibilities:
@@ -56,13 +57,10 @@ async function refreshBadge() {
 
 function setupContextMenu() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: 'save-evidence', title: 'Add passage to evidence board', contexts: ['selection'] });
-    chrome.contextMenus.create({ id: 'capture-evidence', title: 'Capture screenshot as evidence', contexts: ['page', 'selection'] });
-    chrome.contextMenus.create({
-      id: 'save-highlight',
-      title: 'Save highlight to Research Trail',
-      contexts: ['selection'],
-    });
+    // One way to save a passage: it keeps the page anchor, lands in the
+    // evidence inbox, and shows on the page in the browsing trail.
+    chrome.contextMenus.create({ id: 'save-passage', title: 'Save passage as evidence', contexts: ['selection'] });
+    chrome.contextMenus.create({ id: 'capture-evidence', title: 'Save screenshot as evidence', contexts: ['page', 'selection'] });
   });
 }
 
@@ -829,27 +827,49 @@ async function downscaleThumb(dataUrl, width) {
 
 // ---------- Highlights ----------
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (['save-evidence', 'capture-evidence'].includes(info.menuItemId)) {
-    const journeyId = await ensureActiveWorkspace();
-    const params = new URLSearchParams({ j: journeyId, inbox: '1' });
-    try {
-      await captureEvidence(tab, info, journeyId, info.menuItemId === 'capture-evidence');
-      notifyTrailUpdated(journeyId);
-    } catch (error) { params.set('captureError', error.message); }
-    await openBoard({ j: journeyId }, Object.fromEntries([...params].filter(([k]) => k !== 'j')));
-    return;
-  }
-  if (info.menuItemId !== 'save-highlight' || !info.selectionText || !tab?.url) return;
-  const { activeJourneyId } = await getActive();
-  if (!activeJourneyId) return;
-  const canon = canonicalUrl(tab.url);
-  let node = await db.getOneByIndex('nodes', 'byJourneyUrl', [activeJourneyId, canon]);
-  if (!node) node = await upsertNode(activeJourneyId, canon, tab.url);
-  node.highlights.push({ text: info.selectionText.trim(), at: Date.now() });
-  if (!node.title && tab.title) node.title = tab.title;
+// Captures go to the workspace of the board you last had open, so a passage
+// meant for your argument doesn't land in Scratch after auto-return. The
+// in-page confirmation offers the active workspace instead when it differs.
+async function captureTarget() {
+  const { lastBoard } = await chrome.storage.local.get('lastBoard');
+  const active = await ensureActiveWorkspace();
+  const target = lastBoard?.journeyId && (await db.get('journeys', lastBoard.journeyId)) ? lastBoard.journeyId : active;
+  const [journey, activeJourney] = await Promise.all([db.get('journeys', target), db.get('journeys', active)]);
+  return { journeyId: target, journeyName: journey?.name || 'this workspace', alternative: active !== target && activeJourney && !isScratch(activeJourney) ? { id: active, name: activeJourney.name } : null };
+}
+
+// The passage also shows on its page in the browsing trail (linked to the
+// capture, so the inbox doesn't list it twice). Only for pages already in
+// that workspace's trail: saving never adds pages to a trail.
+async function recordOnTrail(capture) {
+  if (!capture.quote) return;
+  const node = await db.getOneByIndex('nodes', 'byJourneyUrl', [capture.journeyId, canonicalUrl(capture.url)]);
+  if (!node) return;
+  node.highlights = [...(node.highlights || []), { text: capture.quote, at: capture.capturedAt, captureId: capture.id }];
   await db.put('nodes', node);
-  notifyTrailUpdated(activeJourneyId);
+}
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!['save-passage', 'capture-evidence'].includes(info.menuItemId)) return;
+  const screenshot = info.menuItemId === 'capture-evidence';
+  const target = await captureTarget();
+  let toast;
+  try {
+    const capture = await captureEvidence(tab, info, target.journeyId, screenshot);
+    await recordOnTrail(capture);
+    notifyTrailUpdated(target.journeyId);
+    toast = { journeyId: target.journeyId, journeyName: target.journeyName, captureId: capture.id, quote: capture.quote, screenshot,
+      warning: capture.view === 'translated' ? 'Saved from the translated view: switch to the original wording to link to the exact passage.' : capture.view === 'legacy-unverified' ? 'The exact wording couldn’t be checked on this page.' : '',
+      moveTo: target.alternative };
+  } catch (error) {
+    toast = { journeyId: target.journeyId, error: error.message };
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: showCaptureToast, args: [toast] });
+  } catch {
+    // Pages we can't draw on (browser pages, PDFs): show the result on the board.
+    await openBoard({ j: target.journeyId }, toast.error ? { inbox: '1', captureError: toast.error } : { inbox: '1' });
+  }
 });
 
 // ---------- Messages ----------
@@ -863,6 +883,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleMessage(msg, sender) {
   switch (msg.type) {
+    case 'capture-toast-open':
+      await openBoard({ j: msg.journeyId }, { inbox: '1' });
+      return { ok: true };
+
+    case 'capture-toast-move': {
+      const capture = await db.get('evidenceCaptures', msg.captureId);
+      if (!capture || !(await db.get('journeys', msg.journeyId))) return { ok: false };
+      const from = capture.journeyId;
+      await db.put('evidenceCaptures', { ...capture, journeyId: msg.journeyId });
+      // Move its trail record along with it.
+      for (const node of await db.getByIndex('nodes', 'byJourney', from)) {
+        if (!node.highlights?.some((h) => h.captureId === capture.id)) continue;
+        node.highlights = node.highlights.filter((h) => h.captureId !== capture.id);
+        await db.put('nodes', node);
+      }
+      await recordOnTrail({ ...capture, journeyId: msg.journeyId });
+      notifyTrailUpdated(from); notifyTrailUpdated(msg.journeyId);
+      return { ok: true };
+    }
+
     case 'jot-saved':
       notifyTrailUpdated(msg.journeyId);
       return { ok: true };

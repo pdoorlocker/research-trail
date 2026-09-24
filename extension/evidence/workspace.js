@@ -45,7 +45,9 @@ export async function inbox(journeyId) {
     db.getByIndex('nodes', 'byJourney', journeyId),
   ]);
   // Existing highlights remain available without destructively migrating them.
-  const legacy = pages.flatMap(page => (page.highlights || []).map((h, index) => ({
+  // Passages saved as evidence are recorded on the page too (with captureId);
+  // list those once, as the capture.
+  const legacy = pages.flatMap(page => (page.highlights || []).map((h, index) => [h, index]).filter(([h]) => !h.captureId).map(([h, index]) => ({
     id: `highlight:${page.id}:${index}:${h.at}`, journeyId, pageId: page.id,
     title: page.title || page.url, url: page.url, quote: h.text,
     capturedAt: h.at, legacy: true, view: 'legacy-unverified',

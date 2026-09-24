@@ -45,7 +45,7 @@ If Ollama is offline, AI jobs queue up and run automatically when it comes back.
 1. **Just browse.** Capture is always on (pause anytime from the popup or panel — the badge shows `❚❚` while paused). Every page is captured with its readable text, and the extension records *how* you got there: clicked link, opened-in-new-tab branch, or fresh entry point.
 2. **Open the side panel** (📍 in the popup, or Alt+R) — the live "you are here" view. Your current page is ringed in green, pages with open tabs are lit, everything else is parked (dimmed). Click a node to switch to its tab or reopen it; **⏏ Park other tabs** closes everything except where you are, safely.
 3. **Workspaces**: the popup switches between them or creates new ones — each is its own map ("apartment hunt", "Scratch", …).
-4. **Save highlights**: select text on any page → right-click → *Save highlight to Research Trail*.
+4. **Save passages**: select text on any page → right-click → *Save passage as evidence*. It shows on the page in your trail and lands in your evidence inbox, without leaving the page.
 5. **Open the full map** (🗺 in the popup) for the deep view — notes, timeline, AI synthesis, exports:
    - Nodes are pages, sized by reading time and revisits; pages on the same domain cluster into dashed boxes.
    - Solid gray arrows = clicked links; blue = opened in a new tab; purple dashed = AI-found similarity (with a label explaining the connection); orange = connections you drew yourself.
@@ -78,7 +78,7 @@ A workspace can hold one or more **evidence boards**: an argument that answers o
 - **On the board**: click selects; ✎ Edit or double-click opens the editor. Drag a card's → handle onto another card to connect them. Drag the divider beside the side panel to resize it (double-click collapses it).
 - **Evidence inbox panel**: drag a captured passage or jotted thought onto a card or outline line to back it up, or onto empty board space to place it.
 - **Picking up where you left off**: the board's URL keeps your whole view, boards closed by an extension reload reopen, and the popup's *Resume* button (or Alt+Shift+R) returns to your last board in any workspace.
-- **Collect**: select text → right-click → *Add passage to evidence board*, or *Capture screenshot as evidence*. Captures land in the board's **Evidence inbox**.
+- **Collect**: select text → right-click → *Save passage as evidence*, or *Save screenshot as evidence*. You stay on the page; a small confirmation shows where it went (the workspace of the board you last had open), with *Open board* and, if you were browsing in another workspace, *Move to …*. Captures land in the board's **Evidence inbox**.
 - **Author**: place evidence, write claims, connect cards, and choose the walkthrough order.
 - **Present**: *▶ Walk through* steps through the argument; *Export brief* gives Markdown, print, or a standalone interactive `.html` reader.
 - **Learn it**: *? How this works* explains the cards and lines; *Take the guided tour* adds a worked example board whose walkthrough explains each concept.

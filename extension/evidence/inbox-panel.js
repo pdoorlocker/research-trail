@@ -44,7 +44,7 @@ export function init(api) {
           ${c.image ? '<p class="inbox-meta">Screenshot included</p>' : ''}
           <button data-place="${esc(c.id)}">${used ? 'Select on board' : 'Add'}</button>
         </li>`;
-      }).join('') || `<li class="empty">${captures.length ? 'Nothing matches.' : 'Nothing captured yet. On any page, select text → right-click → Add passage to evidence board.'}</li>`}</ul>`;
+      }).join('') || `<li class="empty">${captures.length ? 'Nothing matches.' : 'Nothing captured yet. On any page, select text → right-click → Save passage as evidence.'}</li>`}</ul>`;
     const input = panel.querySelector('#inbox-filter');
     input.oninput = () => { filter = input.value; draw(); const again = panel.querySelector('#inbox-filter'); again.focus(); again.setSelectionRange(filter.length, filter.length); };
   }

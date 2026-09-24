@@ -1800,7 +1800,7 @@ function renderDrawer() {
     }
   } else {
     hl.className = 'muted small';
-    hl.textContent = 'Select text on the page → right-click → “Save highlight to Research Trail”.';
+    hl.textContent = 'Select text on the page → right-click → “Save passage as evidence”.';
   }
 
   const conns = $('d-connections');
