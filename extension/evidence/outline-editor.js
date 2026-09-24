@@ -349,6 +349,7 @@ export function init(api) {
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
           ${n.type === 'conclusion' ? (main?.id === n.id ? '<span class="ol-answer">answers the question</span>' : `${api.isInterim(n) ? '<span class="ol-source">interim</span>' : ''}<button class="ol-make-answer" data-answer="${esc(n.id)}" title="Make this the conclusion that answers the question">★ make this the answer</button>`) : ''}
+          <button class="ol-add-also" data-also="${esc(n.id)}" title="Also connect this line to another line (or type @ in the line)">+ also</button>
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
         ${extras.map(l => `<button class="ol-also" data-goto="${esc(l.to)}" data-link="${esc(l.id)}">↳ also, ${esc(api.wordLabel(l.word, api.get(l.to).type))}: ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o), 60)) + '”' : esc(clip(o.text, 60)))(api.get(l.to))}</button>`).join('')}
@@ -384,8 +385,10 @@ export function init(api) {
     const spine = [...wrap.querySelectorAll('.ol-item[data-from]:not([data-from=""])')].map(li => {
       const a = chip(li.dataset.from), c = chip(li.dataset.id);
       if (!a || !c) return '';
-      const x1 = a.left - box.left + a.width / 2, y1 = a.bottom - box.top + 2, cy = c.top - box.top + c.height / 2;
-      const d = Math.abs(c.left - a.left) < 4 ? `M${x1},${y1} V${c.top - box.top - 3}` : `M${x1},${y1} V${cy} H${c.left - box.left - 3}`;
+      // One spine per level, near the label's left edge, so a turn into an
+      // indented line has room; small gaps at both ends.
+      const x1 = a.left - box.left + 11, y1 = a.bottom - box.top + 3, cy = c.top - box.top + c.height / 2;
+      const d = Math.abs(c.left - a.left) < 4 ? `M${x1},${y1} V${c.top - box.top - 4}` : `M${x1},${y1} V${cy - 4} Q${x1},${cy} ${x1 + 4},${cy} H${c.left - box.left - 5}`;
       return `<path class="ol-spine k-${esc(li.dataset.joinedBy)}" d="${d}" marker-end="url(#ol-head)"/>`;
     }).join('');
     // "Also" links: out into the left margin, down, and into the target
@@ -413,7 +416,7 @@ export function init(api) {
       const word = api.board.links.find(l => l.id === g.ref.dataset.link)?.word || '';
       return `<path class="ol-also-line k-${esc(word)}" data-arrow="${esc(g.ref.dataset.link)}" d="${d}" marker-end="url(#ol-head)"/>`;
     }).join('');
-    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>${spine}${paths}`;
+    svg.innerHTML = `<defs><marker id="ol-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto"><path class="ol-head" d="M1.5 1.5 L8.5 5 L1.5 8.5" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>${spine}${paths}`;
   }
   new ResizeObserver(() => { if (api.tab === 'outline') drawArrows(); }).observe(view);
   view.addEventListener('mouseover', e => {
@@ -500,12 +503,77 @@ export function init(api) {
     importNotes(items);
   });
 
+  // ---------- "Also" picker: connect a line to one more line ----------
+  // Opened from a row's "+ also" button or by typing "@" in the line.
+
+  let picker = null; // { id, el, active }
+  function openPicker(id) {
+    closePicker();
+    const n = api.get(id), row = view.querySelector(`[data-row="${CSS.escape(id)}"]`);
+    if (!n || !row) return;
+    const el = document.createElement('div');
+    el.className = 'ol-picker';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Also connect this line to another line');
+    el.innerHTML = `<p class="ol-picker-head">“${esc(clip(textOf(n), 60))}”
+        <select data-picker-word aria-label="Word">${api.WORD_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 'so' ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> …</p>
+      <input type="search" data-picker-search placeholder="Find the line it also leads to" autocomplete="off" aria-label="Find a line">
+      <ul class="ol-picker-list" role="listbox"></ul>`;
+    document.body.append(el);
+    const r = row.getBoundingClientRect();
+    el.style.left = Math.max(8, Math.min(r.left + 40, innerWidth - 440)) + 'px';
+    el.style.top = Math.min(r.bottom + 4, innerHeight - 320) + 'px';
+    picker = { id, el, active: 0 };
+    const search = el.querySelector('[data-picker-search]');
+    search.addEventListener('input', () => { picker.active = 0; drawPicker(); });
+    search.addEventListener('keydown', e => {
+      const items = el.querySelectorAll('[data-pick]');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picker.active = (picker.active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % Math.max(1, items.length); drawPicker(); }
+      else if (e.key === 'Enter') { e.preventDefault(); items[picker.active]?.click(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePicker(true); }
+    });
+    el.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) pickAlso(b.dataset.pick); });
+    drawPicker();
+    search.focus();
+  }
+  function drawPicker() {
+    if (!picker) return;
+    const { el, id } = picker, q = el.querySelector('[data-picker-search]').value.trim().toLowerCase();
+    const linked = new Set(api.board.links.filter(l => l.from === id).map(l => l.to));
+    const matches = displayRows(tree()).map(r => r.n).filter(n => n.id !== id && !linked.has(n.id) && (!q || textOf(n).toLowerCase().includes(q))).slice(0, 8);
+    picker.active = Math.min(picker.active, Math.max(0, matches.length - 1));
+    el.querySelector('.ol-picker-list').innerHTML = matches.map((n, i) => `<li><button type="button" data-pick="${esc(n.id)}" role="option" aria-selected="${i === picker.active}" class="${i === picker.active ? 'is-active' : ''}"><span class="ol-picker-type">${esc(TYPES.find(t => t[0] === n.type)?.[1] || '')}</span> ${esc(clip(textOf(n), 80))}</button></li>`).join('') || '<li class="ol-picker-empty">No other line matches.</li>';
+  }
+  function closePicker(refocus) {
+    if (!picker) return;
+    const id = picker.id;
+    picker.el.remove(); picker = null;
+    if (refocus) { focus = { id, offset: Infinity }; restoreFocus(); }
+  }
+  function pickAlso(toId) {
+    const { id, el } = picker, word = el.querySelector('[data-picker-word]').value;
+    closePicker();
+    change(() => {
+      const from = api.get(id), to = api.get(toId);
+      if (api.board.links.some(l => l.from === id && l.to === toId)) return false;
+      api.board.links.push({ id: api.uid(), from: id, to: toId, word: api.fitWord(from.type, to.type, word), label: '' });
+    }, { id, offset: Infinity });
+  }
+  document.addEventListener('mousedown', e => { if (picker && !picker.el.contains(e.target) && !e.target.closest('[data-also]')) closePicker(); });
+
   // ---------- Events ----------
 
   view.addEventListener('input', e => {
     const el = e.target.closest('[data-text]');
     if (!el) return;
-    const id = el.dataset.text, n = api.get(id), value = el.textContent;
+    const id = el.dataset.text, n = api.get(id);
+    if (e.inputType === 'insertText' && e.data === '@') {
+      const at = caretOffset(), text = el.textContent, cut = text.slice(0, at - 1) + text.slice(at);
+      el.textContent = cut; setCaret(el, at - 1);
+      pending = { id, value: cut }; flushText();
+      return openPicker(id);
+    }
+    const value = el.textContent;
     requestAnimationFrame(drawArrows);
     const w = readWord(value);
     if (w) {
@@ -590,8 +658,9 @@ export function init(api) {
   });
 
   view.addEventListener('click', e => {
-    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]');
-    if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
+    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]'), also = e.target.closest('[data-also]');
+    if (also) { flushText(); picker?.id === also.dataset.also ? closePicker() : openPicker(also.dataset.also); }
+    else if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
     else if (go) { focus = { id: go.dataset.goto, offset: Infinity }; restoreFocus(); }
     else if (e.target.closest('[data-order-from-outline]')) orderFromOutline();
     else if (e.target.closest('[data-tidy]')) tidy();
