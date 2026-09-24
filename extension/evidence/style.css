@@ -223,3 +223,18 @@ body.heading-folded .compact-title{display:block}
 .ol-picker-type{font:10px var(--mono);text-transform:uppercase;color:var(--muted);margin-right:4px}
 .ol-picker-empty{font-size:13px;color:var(--muted);padding:6px 8px}
 .ol-picker-head select{width:auto!important;display:inline-block;field-sizing:content}
+/* Editor dropdowns: the "+ also" picker style */
+select.pick-native{position:absolute!important;opacity:0!important;pointer-events:none!important;width:1px!important;height:1px!important;padding:0!important;border:0!important}
+.pick-button{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;padding:7px 10px!important;border:1px solid var(--border)!important;border-radius:6px!important;background:var(--card)!important;color:var(--ink);text-align:left;font:15px/1.35 var(--serif);white-space:normal;cursor:pointer}
+.pick-button:hover{border-color:var(--muted)!important}
+.pick-button[aria-expanded=true],.pick-button:focus-visible{outline:none;border-color:var(--accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%,transparent)}
+.pick-current{flex:1;min-width:0}
+.pick-caret{flex:none;color:var(--muted);font-size:12px}
+.pick-type{font:10px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-right:3px}
+.pick-pop{position:fixed;z-index:60;max-width:min(560px,calc(100vw - 16px));background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px #0006;padding:8px;outline:none}
+.pick-pop .pick-search{width:100%;margin-bottom:6px}
+.pick-list{list-style:none;margin:0;padding:0;max-height:280px;overflow:auto}
+.pick-list button{display:block;width:100%;text-align:left;border:0!important;background:transparent!important;padding:7px 9px!important;border-radius:5px!important;font:15px/1.35 var(--serif);color:var(--ink);white-space:normal;min-height:0!important;cursor:pointer}
+.pick-list button.is-active,.pick-list button:hover{background:var(--accent-soft)!important}
+.pick-list button.is-current::after{content:' ✓';color:var(--green)}
+.pick-none{font-size:13px;color:var(--muted);padding:6px 9px}

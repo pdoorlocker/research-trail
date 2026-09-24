@@ -126,6 +126,41 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-answer]');
   const toggle=()=>{apply(document.body.classList.contains('heading-folded')?natural():0);save()};
   split.addEventListener('dblclick',toggle);
   split.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();toggle()}else if(['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();const h=document.body.classList.contains('heading-folded')?0:head.offsetHeight;apply(h+(e.key==='ArrowDown'?40:-40));save()}});}}
+// Editor dropdowns use the same searchable picker as the outline's "+ also".
+// The native <select> stays the source of truth (values, validation, change
+// events); the picker only replaces how it looks and is operated.
+let pickOpen=null;
+function closePick(){pickOpen?.btn.setAttribute('aria-expanded','false');pickOpen?.pop.remove();pickOpen=null}
+function pickLabel(o){const m=/^([a-z][\w ]*?): (.*)$/i.exec(o.text);return m?`<span class="pick-type">${esc(m[1])}</span> ${esc(m[2])}`:esc(o.text)}
+function enhanceSelect(sel){
+ if(sel._pick)return;
+ const btn=document.createElement('button');btn.type='button';btn.className='pick-button';btn.setAttribute('aria-haspopup','listbox');
+ if(sel.id){const lab=document.querySelector(`label[for="${CSS.escape(sel.id)}"]`);if(lab)btn.setAttribute('aria-label',lab.textContent)}
+ sel.classList.add('pick-native');sel.tabIndex=-1;sel.after(btn);
+ const refresh=()=>{const o=sel.selectedOptions[0];btn.innerHTML=`<span class="pick-current">${o?pickLabel(o):'Choose…'}</span><span class="pick-caret" aria-hidden="true">▾</span>`;btn.disabled=sel.disabled};
+ sel._pick={refresh};sel.addEventListener('change',refresh);refresh();
+ const open=()=>{closePick();const opts=[...sel.options].filter(o=>!o.hidden&&!o.disabled),host=sel.closest('dialog')||document.body,pop=document.createElement('div');
+  pop.className='pick-pop';pop.tabIndex=-1;pop.innerHTML=`${opts.length>7?'<input type="search" class="pick-search" placeholder="Type to find…" autocomplete="off" aria-label="Filter the list">':''}<ul class="pick-list" role="listbox"></ul>`;host.append(pop);
+  const search=pop.querySelector('.pick-search');let active=Math.max(0,opts.findIndex(o=>o.selected)),shown=opts;
+  const draw=()=>{const q=(search?.value||'').trim().toLowerCase();shown=opts.filter(o=>!q||o.text.toLowerCase().includes(q));active=Math.min(active,Math.max(0,shown.length-1));
+   pop.querySelector('.pick-list').innerHTML=shown.map((o,i)=>`<li><button type="button" role="option" tabindex="-1" data-value="${esc(o.value)}" aria-selected="${o.selected}" class="${i===active?'is-active':''} ${o.selected?'is-current':''}">${pickLabel(o)}</button></li>`).join('')||'<li class="pick-none">Nothing matches.</li>';
+   pop.querySelector('.is-active')?.scrollIntoView({block:'nearest'})};
+  const choose=v=>{sel.value=v;sel.dispatchEvent(new Event('change',{bubbles:true}));refresh();closePick();btn.focus()};
+  pop.addEventListener('click',e=>{const b=e.target.closest('[data-value]');if(b)choose(b.dataset.value)});
+  pop.addEventListener('keydown',e=>{const n=shown.length;if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:-1)+n)%Math.max(1,n);draw()}else if(e.key==='Enter'){e.preventDefault();const o=shown[active];if(o)choose(o.value)}else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closePick();btn.focus()}else if(e.key==='Tab'){closePick()}});
+  search?.addEventListener('input',()=>{active=0;draw()});
+  draw();
+  const r=btn.getBoundingClientRect(),h=pop.offsetHeight;pop.style.minWidth=r.width+'px';
+  pop.style.left=Math.max(8,Math.min(r.left,innerWidth-pop.offsetWidth-8))+'px';
+  pop.style.top=(r.bottom+4+h>innerHeight-8?Math.max(8,r.top-4-h):r.bottom+4)+'px';
+  (search||pop).focus();pickOpen={pop,btn};btn.setAttribute('aria-expanded','true')};
+ btn.addEventListener('click',()=>pickOpen?.btn===btn?closePick():open());
+ btn.addEventListener('keydown',e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();open()}});
+}
+document.addEventListener('mousedown',e=>{if(pickOpen&&!pickOpen.pop.contains(e.target)&&!pickOpen.btn.contains(e.target))closePick()},true);
+// Enhance every dropdown the editor dialogs render.
+new MutationObserver(()=>{$$('#editor select').forEach(enhanceSelect)}).observe($('#editor'),{childList:true,subtree:true});
+$('#editor').addEventListener('close',closePick);
 let dragMoved=false;$('#viewport').addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('a,button'))return;const el=e.target.closest('[data-node]'),n=el&&get(el.dataset.node);if(n&&!author)return;const sx=e.clientX,sy=e.clientY,ox=n?.x,oy=n?.y,sl=$('#viewport').scrollLeft,st=$('#viewport').scrollTop;dragMoved=false;const move=ev=>{const dx=ev.clientX-sx,dy=ev.clientY-sy;if(Math.hypot(dx,dy)<4&&!dragMoved)return;dragMoved=true;if(n){n.x=Math.max(0,ox+dx/zoom);n.y=Math.max(0,oy+dy/zoom);const p=pos(n);el.style.left=p.x+'px';el.style.top=p.y+'px';renderEdges()}else{$('#viewport').scrollLeft=sl-dx;$('#viewport').scrollTop=st-dy}};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(n&&dragMoved){delete n.auto;persist();setTimeout(render,0)}setTimeout(()=>dragMoved=false,50)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true});});
 window.addEventListener('resize',()=>renderEdges());document.fonts.ready.then(renderEdges);document.addEventListener('load',e=>{if(e.target.tagName==='IMG')renderEdges()},true);
 let history=[],future=[],lastSnapshot=JSON.stringify(board),unsaved=false;
@@ -246,8 +281,8 @@ function openCard(type='claim',id=null){const n=id?get(id):null;editingId=id;cap
  else showEditor(id?'Edit card':'Add '+(type==='gap'?'open question':type),`<label class="form-label" for="card-type">Card type</label><select id="card-type">${options([['note','Thought (not sorted yet)'],['fact','Fact'],['claim','Claim'],['conclusion','Conclusion'],['gap','Open question']],n?.type||type)}</select>`+area('card-text','Text',n?wording(n):'',true)+shared,'card');
 }
 $('#add-claim').onclick=()=>openCard('claim');$('#add-fact').onclick=()=>openCard('fact');$('#add-gap').onclick=()=>openCard('gap');$('#add-source').onclick=()=>openCard('evidence');
-function openConnection(id,linkId=null){const l=linkId&&board.links.find(l=>l.id===linkId),n=get(id);editingId=linkId;const opts=board.nodes.map(n=>[n.id,n.type+': '+wording(n).slice(0,85)]);showEditor(l?'Edit connection':'Connect two cards',`<label class="form-label" for="link-from">From</label><select id="link-from">${options(opts,l?.from||id)}</select><label class="form-label" for="link-kind">…then the word you'd say between them</label><select id="link-kind">${options(WORD_CHOICES,l?.word||'because')}</select><label class="form-label" for="link-to">To</label><select id="link-to">${options(opts,l?.to||board.nodes.find(n=>n.id!==id)?.id)}</select>`+input('link-label','Why are these connected?',l?.label||'')+'<p class="form-help">Connections are authored by you. “Is a source for” does not verify a claim. Objections stay visible until you edit or remove the connection.</p>','connection');$('#link-from').onchange=syncLinkKinds;$('#link-to').onchange=syncLinkKinds;syncLinkKinds()}
-function syncLinkKinds(){const sel=$('#link-kind'),allowed=allowedWords(get($('#link-from').value)?.type,get($('#link-to').value)?.type);for(const o of sel.options)o.hidden=o.disabled=!allowed.includes(o.value);if(!allowed.includes(sel.value))sel.value=allowed[0]}
+function openConnection(id,linkId=null){const l=linkId&&board.links.find(l=>l.id===linkId),n=get(id);editingId=linkId;const opts=board.nodes.map(n=>[n.id,(({gap:'question',note:'thought',evidence:'quote'})[n.type]||n.type)+': '+(wording(n)||n.quote||'').slice(0,85)]);showEditor(l?'Edit connection':'Connect two cards',`<label class="form-label" for="link-from">From</label><select id="link-from">${options(opts,l?.from||id)}</select><label class="form-label" for="link-kind">…then the word you'd say between them</label><select id="link-kind">${options(WORD_CHOICES,l?.word||'because')}</select><label class="form-label" for="link-to">To</label><select id="link-to">${options(opts,l?.to||board.nodes.find(n=>n.id!==id)?.id)}</select>`+input('link-label','Why are these connected?',l?.label||'')+'<p class="form-help">Connections are authored by you. “Is a source for” does not verify a claim. Objections stay visible until you edit or remove the connection.</p>','connection');$('#link-from').onchange=syncLinkKinds;$('#link-to').onchange=syncLinkKinds;syncLinkKinds()}
+function syncLinkKinds(){const sel=$('#link-kind'),allowed=allowedWords(get($('#link-from').value)?.type,get($('#link-to').value)?.type);for(const o of sel.options)o.hidden=o.disabled=!allowed.includes(o.value);if(!allowed.includes(sel.value))sel.value=allowed[0];sel._pick?.refresh()}
 let draftSteps=[];
 function openOrder(){draftSteps=[...board.steps];showEditor('Arrange the walkthrough','<p class="form-help">These steps define the reading order. Sample-case routes only show their applicable steps.</p><div id="step-order"></div>','order');renderOrder()}
 function renderOrder(){$('#step-order').innerHTML=draftSteps.map((id,i)=>`<div class="order-row"><span>${String(i+1).padStart(2,'0')}</span><p>${esc(wording(get(id)))}</p><button type="button" data-order-up="${i}" aria-label="Move step ${i+1} up" ${i===0?'disabled':''}>↑</button><button type="button" data-order-down="${i}" aria-label="Move step ${i+1} down" ${i===draftSteps.length-1?'disabled':''}>↓</button><button type="button" data-order-remove="${i}" aria-label="Remove step ${i+1}">✕</button></div>`).join('')+`<label class="form-label" for="step-add">Add another card</label><div class="form-row"><select id="step-add">${options(board.nodes.filter(n=>!draftSteps.includes(n.id)).map(n=>[n.id,wording(n).slice(0,80)]),'')}</select><button type="button" id="step-add-button" ${draftSteps.length===board.nodes.length?'disabled':''}>Add step</button></div>`}
