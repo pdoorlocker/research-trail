@@ -16,10 +16,13 @@ const TYPES = [['note', 'Thought'], ['fact', 'Fact'], ['claim', 'Claim'], ['conc
 // continuation ("and because", "but also"); nothing extra is stored.
 const stanceOf = kind => kind === 'challenges' ? 'against' : kind === 'questions' ? 'question' : 'for';
 const SO = /^(and so|so|thus|therefore|ergo),?\s/i;
+// "X, but Y" usually means "and there's also Y to reckon with", not "Y proves X
+// wrong": the two become joint reasons for a line you then write.
+const BUT = /^but,?\s/i;
 
 // Extra connections, phrased from each end.
-const ALSO_OUT = { reasoning: 'is also a reason why', supports: 'is also a source for', challenges: 'also pushes back on', questions: 'is also an open question for' };
-const ALSO_IN = { reasoning: 'also because', supports: 'as another source says', challenges: 'but also', questions: 'which also raises the question' };
+const ALSO_OUT = { reasoning: 'is also a reason why', supports: 'is also a source for', challenges: 'also objects to', questions: 'is also an open question for' };
+const ALSO_IN = { reasoning: 'also because', supports: 'as another source says', challenges: 'another objection:', questions: 'which also raises the question' };
 const PREFIX = { '?': 'gap', '>': 'evidence', '!': 'conclusion', '-': 'fact', '~': 'challenge' };
 const COL = 410, GAP_Y = 36, TREE_GAP = 90;
 
@@ -175,6 +178,27 @@ export function init(api) {
     return true;
   }
 
+  function joinTarget(id, t = tree()) {
+    const n = api.get(id), parentId = t.parentOf.get(id) ?? null, siblings = t.kids(parentId), i = siblings.indexOf(n);
+    return i > 0 ? siblings[i - 1] : parentId ? api.get(parentId) : null;
+  }
+  function joinWithAbove(id) {
+    const other = joinTarget(id);
+    if (!other) return false;
+    change(t => {
+      const b = api.board, n = api.get(id), grand = t.parentOf.get(other.id) ?? null, oldKind = t.primary.get(other.id)?.kind;
+      const joint = newCard('note', '');
+      joint.ord = other.ord;
+      b.nodes.push(joint);
+      setParent(other.id, joint.id, t); other.ord = 0;
+      setParent(id, joint.id, t); n.ord = 1;
+      if (grand) setParent(joint.id, grand, t, oldKind);
+      focus = { id: joint.id, offset: 0 };
+    });
+    api.notify('Made these two reasons for a new line. Write what they add up to.');
+    return true;
+  }
+
   function indent(id) {
     if (building()) return indentBuild(id);
     change(t => {
@@ -269,7 +293,7 @@ export function init(api) {
         placed.add(n.id);
         let cursor = y;
         for (const k of t.kids(n.id)) cursor = place(k, d + 1, cursor) + GAP_Y;
-        if (n.auto) put(n, 30 + (depth - d) * COL, y);
+        if (n.auto) put(n, 30 + (b.framing === 'build' ? depth - d : d) * COL, y);
         return Math.max(y + h(n), t.kids(n.id).length ? cursor - GAP_Y : 0);
       };
       top = place(root, 0, top) + TREE_GAP;
@@ -277,7 +301,7 @@ export function init(api) {
     for (const n of b.nodes) {
       if (!n.auto || placed.has(n.id)) continue;
       const parent = api.get(t.parentOf.get(n.id));
-      let x = parent ? Math.max(0, parent.x - COL) : 30, y = parent ? parent.y : top;
+      let x = parent ? Math.max(0, parent.x + (b.framing === 'build' ? -COL : COL)) : 30, y = parent ? parent.y : top;
       const hit = yy => b.nodes.some(o => o !== n && !o.auto && x < o.x + 330 && x + 330 > o.x && yy < o.y + h(o) + 30 && yy + h(n) + 30 > o.y);
       for (let i = 0; i < 200 && hit(y); i++) y += 40;
       put(n, x, y);
@@ -332,9 +356,9 @@ export function init(api) {
           <select class="ol-type type-${esc(n.type)}" data-type="${esc(n.id)}" aria-label="Kind of line">${TYPES.map(([v, l]) => `<option value="${v}" ${v === n.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
           ${parent && !(build && kids.length) ? (n.type === 'gap'
             ? `<span class="ol-rel is-fixed">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</span>`
-            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? `Pushes back on the line ${build ? 'it leads to' : 'above'}. Click to make it support it instead.` : `Supports the line ${build ? 'it leads to' : 'above'}. Click to make it push back instead.`}">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</button>`) : ''}
-          ${build && kids.length ? `<span class="ol-rel is-fixed is-lead ${rel === 'challenges' ? 'rel-challenges' : ''}" ${rel === 'challenges' ? 'title="This conclusion pushes back on the one it leads to"' : ''}>${kids.some(k => stanceOf(t.primary.get(k.id)?.kind) === 'for') ? 'and so' : kids.some(k => t.primary.get(k.id)?.kind === 'challenges') ? 'still,' : ''}</span>` : ''}
-          <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : 'Type a thought…'}">${esc(textOf(n))}</div>
+            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? `An objection to the line ${build ? 'it leads to' : 'above'}. Click to make it support it instead.` : `Supports the line ${build ? 'it leads to' : 'above'}. Click to make it an objection instead.`}">${(build ? api.buildWord : api.answerWord)(n.type, rel, again)}</button>`) : ''}
+          ${build && kids.length ? `<span class="ol-rel is-fixed is-lead ${rel === 'challenges' ? 'rel-challenges' : ''}" ${rel === 'challenges' ? 'title="This conclusion is an objection to the one it leads to"' : ''}>${kids.some(k => stanceOf(t.primary.get(k.id)?.kind) === 'for') ? 'and so' : kids.some(k => t.primary.get(k.id)?.kind === 'challenges') ? 'still,' : ''}</span>` : ''}
+          <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : kids.length ? (build ? 'and so… what follows?' : 'What do the lines below add up to?') : 'Type a thought…'}">${esc(textOf(n))}</div>
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
           ${n.type === 'conclusion' ? (api.mainConclusion()?.id === n.id ? '<span class="ol-answer">answers the question</span>' : api.isInterim(n) ? '<span class="ol-source">interim</span>' : '') : ''}
@@ -351,16 +375,12 @@ export function init(api) {
       <div class="ol-shell">
         <label class="ol-label" for="ol-title">Question</label>
         <input id="ol-title" class="ol-title" value="${esc(title)}" placeholder="What are you trying to figure out? (optional, add it later)">
-        <div class="ol-framing" role="group" aria-label="Read the outline">
-          <button type="button" data-framing="answer" aria-pressed="${!build}" title="Each line is followed by what backs it up: “Y because X”">Answer first</button>
-          <button type="button" data-framing="build" aria-pressed="${build}" title="Reasons come first and lead to what follows: “X, and so Y”">Build up</button>
-        </div>
         ${unplaced.length ? `<div class="ol-inbox"><span>${unplaced.length} thought${unplaced.length === 1 ? '' : 's'} jotted from the side panel</span><button data-add-jots>Add to outline</button></div>` : ''}
         <div class="ol-tree-wrap"><ul class="ol-tree ${build ? 'is-build' : ''}" aria-label="Outline">${roots.map(row).join('')}</ul><svg class="ol-arrows" aria-hidden="true"></svg></div>
         ${roots.length ? '' : '<p class="ol-empty">Nothing here yet. Write whatever you already know or suspect, one thought per line. Sort it out afterwards.</p>'}
         <div class="ol-drop-root" data-drop-root>Drop here to move a line to the top level</div>
         <form class="ol-jot" id="ol-jot-form"><input id="ol-jot" placeholder="Jot a thought and press Enter" autocomplete="off" aria-label="Jot a thought"><button class="dark">Add</button></form>
-        <p class="ol-keys">${build ? '<kbd>Tab</kbd> make it a reason for the line below · start a line with <kbd>so</kbd> to draw a conclusion from the lines above ·' : '<kbd>Tab</kbd> put under the line above · <kbd>⇧ Tab</kbd> move out ·'} <kbd>Alt ↑↓</kbd> reorder · start a line with <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you <kbd>~</kbd> pushback</p>
+        <p class="ol-keys">${build ? '<kbd>Tab</kbd> make it a reason for the line below · start a line with <kbd>so</kbd> to draw a conclusion from the lines above ·' : '<kbd>Tab</kbd> put under the line above · <kbd>⇧ Tab</kbd> move out ·'} <kbd>Alt ↑↓</kbd> reorder · start a line with <kbd>?</kbd> question <kbd>&gt;</kbd> quote <kbd>!</kbd> conclusion <kbd>-</kbd> fact about you <kbd>~</kbd> objection · <kbd>but</kbd> joins two lines as reasons for a new one</p>
         ${roots.length > 1 || roots.some(r => t.kids(r.id).length) ? '<div class="ol-actions"><button data-order-from-outline title="Reasons first, then what they lead to">Use this order for the walkthrough</button><button data-tidy>Re-arrange the board from this outline</button></div>' : ''}
       </div>`;
     restoreFocus();
@@ -427,6 +447,11 @@ export function init(api) {
     if (!el) return;
     const id = el.dataset.text, n = api.get(id);
     let value = el.textContent;
+    if (BUT.test(value) && joinTarget(id)) {
+      pending = { id, value: value.replace(BUT, '') };
+      flushText();
+      return joinWithAbove(id);
+    }
     if (building() && SO.test(value) && reasonsAbove(id).length) {
       pending = { id, value: value.replace(SO, '') };
       flushText();
@@ -504,7 +529,12 @@ export function init(api) {
     const prefix = readPrefix(raw + ' ');
     const type = prefix && prefix.kind !== 'challenge' ? prefix.kind : 'note';
     const text = prefix ? prefix.rest.trim() : raw;
-    if (building() && SO.test(raw)) {
+    if (BUT.test(raw) && tree().kids(null).length) {
+      addLine(null, raw.replace(BUT, '').trim(), type);
+      const last = tree().kids(null).at(-1);
+      if (last) joinWithAbove(last.id);
+      return;
+    } else if (building() && SO.test(raw)) {
       addLine(null, raw.replace(SO, '').trim(), type);
       const last = tree().kids(null).at(-1);
       if (last) gather(last.id);
@@ -515,12 +545,6 @@ export function init(api) {
 
   view.addEventListener('click', e => {
     const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]'), stance = e.target.closest('[data-stance]');
-    const framing = e.target.closest('[data-framing]');
-    if (framing) {
-      api.board.framing = framing.dataset.framing;
-      api.persist(); api.render();
-      return;
-    }
     if (stance) {
       const id = stance.dataset.stance;
       change(t => { const l = t.primary.get(id); l.kind = l.kind === 'challenges' ? kindFor(api.get(id)) : 'challenges'; }, null);
@@ -592,6 +616,21 @@ export function init(api) {
       }
     }, null);
   }
+
+  // Reading direction, shared by the outline and the spatial board.
+  document.querySelector('.board-bar .tabs')?.insertAdjacentHTML('afterend', `<div class="ol-framing" role="group" aria-label="Read the argument">
+    <button type="button" data-framing="answer" title="The point first, then what backs it up: “Y because X”">Answer first</button>
+    <button type="button" data-framing="build" title="Reasons first, leading to the point: “X, and so Y”">Build up</button></div>`);
+  const syncFraming = () => document.querySelectorAll('[data-framing]').forEach(b => b.setAttribute('aria-pressed', String((api.board.framing === 'build') === (b.dataset.framing === 'build'))));
+  api.onRender(syncFraming);
+  document.addEventListener('click', e => {
+    const f = e.target.closest('[data-framing]');
+    if (!f || api.board.framing === f.dataset.framing || (!api.board.framing && f.dataset.framing === 'answer')) return;
+    flushText();
+    api.board.framing = f.dataset.framing;
+    needsLayout = true; layout(false);
+    api.persist(); api.render();
+  });
 
   // Empty-board shortcut and cross-tab jot notifications.
   document.addEventListener('click', e => { if (e.target.closest('[data-open-outline]')) { focus = { id: 'jot' }; api.setTab('outline'); } });

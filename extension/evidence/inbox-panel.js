@@ -81,8 +81,11 @@ export function init(api) {
   // down until it clears other cards.
   function besideCard(target) {
     const el = document.querySelector(`#canvas [data-node="${CSS.escape(target.id)}"]`);
-    let x = target.x - 340, y = target.y;
-    if (x < 0) x = target.x + (el?.offsetWidth || 300) + 40;
+    // Reasons sit on the side the board reads from: right of the point when
+    // it reads answer first, left of it when it builds up.
+    const right = target.x + (el?.offsetWidth || 300) + 40;
+    let x = api.board.framing === 'build' ? target.x - 340 : right, y = target.y;
+    if (x < 0) x = right;
     const clash = yy => api.board.nodes.some(n => {
       const e = document.querySelector(`#canvas [data-node="${CSS.escape(n.id)}"]`), w = e?.offsetWidth || 300, h = e?.offsetHeight || 220;
       return x < n.x + w + 20 && x + 300 > n.x && yy < n.y + h + 20 && yy + 220 > n.y;

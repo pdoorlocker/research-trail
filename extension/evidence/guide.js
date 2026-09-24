@@ -10,7 +10,7 @@ const TIPS = {
   'guide-f1': ['Facts: your situation', 'Grey cards are <b>facts</b> about you. They are the starting point, and no rule proves them. Everything later in the argument depends on them, so a reader can check them first.'],
   'guide-f2': ['Facts narrow the rules', 'A second fact. Facts decide which rules apply: change one and the claims that follow may no longer hold.'],
   'guide-c1': ['Claims need evidence', 'White cards are <b>claims</b>: what a rule says, in your own words. The card below it is <b>evidence</b>: the exact words copied from the source. <b>Open at passage ↗</b> opens the page scrolled to that sentence and highlighted, so nobody has to hunt for it.'],
-  'guide-old': ['Conflicts stay visible', 'This claim is <b>challenged</b>: the evidence below contradicts it (red dashed line on the board). Keep ruled-out assumptions on the board instead of deleting them, so a reader can see what you considered and why it failed.'],
+  'guide-old': ['Objections stay visible', 'This claim has an <b>objection</b>: the evidence below says otherwise (red dashed line on the board). Keep ruled-out assumptions on the board instead of deleting them, so a reader can see what you considered and why it failed.'],
   'guide-c2': ['Weigh the routes', 'Another claim with its own passage. On the board, dotted lines mean <b>evidence supports</b> a card, and solid arrows mean <b>leads to</b>: your reasoning from one card to the next.'],
   'guide-k': ['The working conclusion', 'The green card is your <b>conclusion</b>: the answer the argument arrives at. It also appears at the top of the page. It is your inference from the sources, not an official decision.'],
   'guide-q': ['Be honest about gaps', 'Dashed cards are <b>open questions</b>: what the sources don\'t settle. They double as your checklist for the call to the agency.<br><br>That was the <b>walkthrough</b>: the reading order you choose in Author mode (<b>Order steps</b>). Next, end the walkthrough, switch to <b>Author</b>, and move or edit anything. Your own boards start from <b>＋ New board</b>, or from passages you capture while browsing (<b>Evidence inbox</b>).'],
@@ -22,7 +22,7 @@ function tourBoard() {
     { url, quote, note, tier: 'Primary', checked: '2026-09-23', highlights: [], pdf: url.includes('/cdscontent/load?') });
   const link = (from, to, kind, label = '') => ({ id: crypto.randomUUID(), from, to, kind, label });
   return {
-    version: 1, title: TOUR_TITLE, sample: false,
+    version: 1, title: TOUR_TITLE, sample: false, framing: 'build',
     subtitle: 'A worked example: self-employed Austrian citizen, no previous coverage. Sources checked Sept 2026. Not advice.',
     nodes: [
       node('guide-f1', 'fact', 30, 125, 'Self-employed without a trade licence (freelance)', { note: 'Case assumption.' }),
@@ -66,7 +66,7 @@ const PRIMER = `
 <p class="eyebrow">CONNECTIONS</p>
 <ul class="primer-lines">
   <li><i class="line dotted"></i><span><b>Supports</b>: this evidence backs that card.</span></li>
-  <li><i class="line red"></i><span><b>Challenges</b>: this contradicts that card. It stays visible instead of being deleted.</span></li>
+  <li><i class="line red"></i><span><b>Objects to</b>: this says that card is wrong. It stays visible instead of being deleted.</span></li>
   <li><i class="line"></i><span><b>Leads to</b>: your reasoning from one card to the next.</span></li>
 </ul>
 <p class="eyebrow">HOW TO USE IT</p>
