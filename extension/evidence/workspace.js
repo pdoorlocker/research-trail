@@ -1,4 +1,5 @@
 import * as db from '../lib/db.js';
+import * as opener from './open.js';
 
 export const emptyBoard = (title = 'What am I trying to establish?') => ({
   version: 1, title, subtitle: '', sample: false, nodes: [], links: [], steps: [],
@@ -18,7 +19,11 @@ export async function openWorkspace(params) {
   const journey = journeyId && await db.get('journeys', journeyId);
   if (!journey) throw new Error('Open an existing workspace before creating an evidence board.');
   let boards = await db.getByIndex('evidenceBoards', 'byJourney', journeyId);
-  let record = boards.find(b => b.id === params.get('b')) || boards[0];
+  // Without a specific board, open the one last used in this workspace, else
+  // the most recently edited, rather than whichever was created first.
+  const remembered = await globalThis.chrome?.storage?.local.get('lastBoardByJourney').then(r => r.lastBoardByJourney?.[journeyId]).catch(() => null);
+  let record = boards.find(b => b.id === (params.get('b') || remembered))
+    || [...boards].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
   if (!record) { record = await createBoard(journeyId, emptyBoard(journey.name)); boards = [record]; }
   return { journey, boards, record };
 }
@@ -80,4 +85,10 @@ export async function saveJot(journeyId, text, page = {}) {
     id: crypto.randomUUID(), journeyId, kind: 'note', view: 'jot', title: text.trim().slice(0, 2000), quote: '',
     url, note: url && page.title ? `Jotted while reading “${page.title}”` : '', capturedAt: Date.now(),
   });
+}
+
+// Best effort: outside the extension (tests, exported reader) there is no
+// chrome.storage, and losing "resume" must never break the board.
+export async function rememberView(url, info) {
+  try { if (globalThis.chrome?.storage) await opener.rememberView(url, info); } catch { /* not critical */ }
 }

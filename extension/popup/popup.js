@@ -1,5 +1,6 @@
 import * as db from '../lib/db.js';
 import { workspaceSort } from '../lib/util.js';
+import { openBoard, resumeBoard, lastBoard } from '../evidence/open.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,9 +37,18 @@ async function render() {
   };
   $('open-map-btn').onclick = () => openMap(journey?.id);
   $('open-evidence-btn').onclick = () => {
-    chrome.tabs.create({url:chrome.runtime.getURL('evidence/index.html?' + new URLSearchParams(journey ? {j:journey.id} : {}))});
-    window.close();
+    openBoard(journey ? { j: journey.id } : {}).finally(() => window.close());
   };
+
+  // Resume works whatever workspace is active (auto-return may have moved
+  // you to Scratch) and lands on the exact view you left.
+  const last = await lastBoard();
+  $('resume-btn').hidden = !last;
+  if (last) {
+    $('resume-title').textContent = last.title === 'What am I trying to establish?' ? 'Untitled question' : last.title;
+    $('resume-where').textContent = `${last.journeyName} · Alt+Shift+R`;
+    $('resume-btn').onclick = () => resumeBoard().finally(() => window.close());
+  }
 
   $('ws-create').onclick = createWorkspace;
   $('ws-name').onkeydown = (e) => {

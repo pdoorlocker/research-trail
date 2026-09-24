@@ -37,6 +37,12 @@
         "default": "Alt+R"
       },
       "description": "Open the Research Trail side panel"
+    },
+    "resume-board": {
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      },
+      "description": "Resume the evidence board you were last working on"
     }
   },
   "host_permissions": ["<all_urls>"],

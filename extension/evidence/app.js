@@ -5,6 +5,9 @@ const safeURL=s=>{try{const u=new URL(s);return ['https:','http:'].includes(u.pr
 const domain=s=>{try{return new URL(s).hostname.replace(/^www\./,'')}catch{return 'Source'}};
 const deepLink=n=>{const u=safeURL(n.url);if(!u)return '';if(n.pdf)return u.split('#')[0]+(n.page?'#page='+n.page:'');return u.split('#')[0]+(n.quote?'#:~:text='+encodeURIComponent(n.quote.trim()).replace(/-/g,'%2D'):'')};
 const readerMode=!!document.getElementById('seed-board');
+// Read once, before anything rewrites the URL: this is how a reload or a
+// reopened tab gets back to exactly where you were.
+const initialParams=new URLSearchParams(location.search);let restored=false;
 const workspace = readerMode ? null : await import('./workspace.js');
 let session = null;
 if (workspace) {
@@ -45,6 +48,7 @@ function render(){
  $('#source-list').innerHTML=`<p class="eyebrow">SOURCE LIBRARY · ALL ROUTES</p><div class="source-grid">${board.nodes.filter(n=>n.type==='evidence').map(n=>card(n,true)).join('')}</div>`;
  renderEdges();renderInspector();if(walking)renderWalk();
  for(const hook of renderHooks)hook();
+ syncUrl();
 }
 function renderEdges(){const ids=new Set(visibleNodes().map(n=>n.id));const svg=$('#canvas svg');if(!svg)return;svg.innerHTML=`<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="context-stroke"/></marker></defs>`+board.links.filter(l=>ids.has(l.from)&&ids.has(l.to)).map(l=>{const a=get(l.from),b=get(l.to),ap=pos(a),bp=pos(b),ae=$(`#canvas [data-node="${CSS.escape(a.id)}"]`),be=$(`#canvas [data-node="${CSS.escape(b.id)}"]`);if(!ae||!be)return '';let sx,sy,tx,ty,d;
  if(bp.x>ap.x+ae.offsetWidth-10){sx=ap.x+ae.offsetWidth;sy=ap.y+Math.min(120,ae.offsetHeight)/2;tx=bp.x-6;ty=bp.y+Math.min(120,be.offsetHeight)/2;d=`M${sx},${sy} C${sx+45},${sy} ${tx-45},${ty} ${tx},${ty}`;}else{sx=ap.x+ae.offsetWidth/2;tx=bp.x+be.offsetWidth/2;const down=bp.y>ap.y;sy=ap.y+(down?ae.offsetHeight:0);ty=bp.y+(down?-7:be.offsetHeight+7);d=`M${sx},${sy} C${sx},${(sy+ty)/2} ${tx},${(sy+ty)/2} ${tx},${ty}`;}
@@ -57,7 +61,7 @@ function renderInspector(){const n=get(selected);if(!n){const activeNodes=board.
 }
 function activateCard(id,center=false){select(id,center);if(author&&!readerMode)openCard(get(id).type,id)}
 function select(id,center=false){selected=id;if(center&&get(id)){const n=get(id);if(board.sample&&n.route&&n.route!==route()){allRoutes=true;$('#all-routes').checked=true;}render();const p=pos(n);$('#viewport').scrollTo({left:Math.max(0,(p.x-70)*zoom),top:Math.max(0,(p.y-55)*zoom),behavior:'smooth'});}else render();}
-function renderWalk(){const seq=sequence();step=Math.max(0,Math.min(step,seq.length-1));const n=seq[step];if(!n){$('#walkthrough').innerHTML='<div class="empty"><h2>No walkthrough steps yet.</h2><p>In Author mode, select cards and add them to the walkthrough.</p></div>';return}const ev=board.links.filter(l=>l.to===n.id&&['supports','challenges'].includes(l.kind)).map(l=>({n:get(l.from),kind:l.kind})).filter(x=>x.n);$('#walkthrough').innerHTML=`<div class="walk-shell"><p class="walk-count">STEP ${String(step+1).padStart(2,'0')} / ${String(seq.length).padStart(2,'0')} · ${esc(n.type.toUpperCase())}</p><h2 class="walk-title">${esc(wording(n))}</h2>${author&&!readerMode?`<button class="edit-affordance" data-edit="${n.id}">✎ Edit this step</button>`:''}${n.note?`<p class="walk-note">${esc(n.note)}</p>`:''}<div class="walk-evidence">${n.type==='evidence'?card(n,true):ev.map(e=>`<p class="eyebrow">${esc(e.kind.toUpperCase())}</p>${card(e.n,true)}`).join('')||`<p class="ui-hint">${n.type==='fact'?'Author-stated fact':n.type==='gap'?'Open question':'No supporting sources linked'}</p>`}</div><div class="walk-controls"><button id="prev-step" ${step===0?'disabled':''}>← Back</button><div class="progress">${seq.map((_,i)=>`<button data-walk-step="${i}" class="${i<=step?'done':''}" aria-label="Go to step ${i+1}"></button>`).join('')}</div><button id="next-step" class="dark">${step===seq.length-1?'Finish':'Next →'}</button></div></div>`;$('#inspector').innerHTML=`<h2 class="panel-label">Walkthrough</h2><div class="reading-list">${seq.map((s,i)=>`<button data-walk-step="${i}" ${i===step?'aria-current="step" style="color:var(--green);font-weight:600"':''}><span class="num">${String(i+1).padStart(2,'0')}</span>${esc(wording(s))}</button>`).join('')}</div>`}
+function renderWalk(){const seq=sequence();step=Math.max(0,Math.min(step,seq.length-1));syncUrl();const n=seq[step];if(!n){$('#walkthrough').innerHTML='<div class="empty"><h2>No walkthrough steps yet.</h2><p>In Author mode, select cards and add them to the walkthrough.</p></div>';return}const ev=board.links.filter(l=>l.to===n.id&&['supports','challenges'].includes(l.kind)).map(l=>({n:get(l.from),kind:l.kind})).filter(x=>x.n);$('#walkthrough').innerHTML=`<div class="walk-shell"><p class="walk-count">STEP ${String(step+1).padStart(2,'0')} / ${String(seq.length).padStart(2,'0')} · ${esc(n.type.toUpperCase())}</p><h2 class="walk-title">${esc(wording(n))}</h2>${author&&!readerMode?`<button class="edit-affordance" data-edit="${n.id}">✎ Edit this step</button>`:''}${n.note?`<p class="walk-note">${esc(n.note)}</p>`:''}<div class="walk-evidence">${n.type==='evidence'?card(n,true):ev.map(e=>`<p class="eyebrow">${esc(e.kind.toUpperCase())}</p>${card(e.n,true)}`).join('')||`<p class="ui-hint">${n.type==='fact'?'Author-stated fact':n.type==='gap'?'Open question':'No supporting sources linked'}</p>`}</div><div class="walk-controls"><button id="prev-step" ${step===0?'disabled':''}>← Back</button><div class="progress">${seq.map((_,i)=>`<button data-walk-step="${i}" class="${i<=step?'done':''}" aria-label="Go to step ${i+1}"></button>`).join('')}</div><button id="next-step" class="dark">${step===seq.length-1?'Finish':'Next →'}</button></div></div>`;$('#inspector').innerHTML=`<h2 class="panel-label">Walkthrough</h2><div class="reading-list">${seq.map((s,i)=>`<button data-walk-step="${i}" ${i===step?'aria-current="step" style="color:var(--green);font-weight:600"':''}><span class="num">${String(i+1).padStart(2,'0')}</span>${esc(wording(s))}</button>`).join('')}</div>`}
 $('#kind').onchange=e=>{board.kind=e.target.value;selected=null;persist();render()};$('#profit').onchange=e=>{board.profit=e.target.value;selected=null;persist();render()};$('#all-routes').onchange=e=>{allRoutes=e.target.checked;render()};$('#view').onclick=()=>{author=false;render()};$('#author').onclick=()=>{author=true;render()};$('#map-tab').onclick=()=>{tab='map';render()};if($('#outline-tab'))$('#outline-tab').onclick=()=>{tab='outline';render()};$('#sources-tab').onclick=()=>{tab='sources';render()};$('#zoom-in').onclick=()=>{zoom=Math.min(1.5,zoom+.1);render()};$('#zoom-out').onclick=()=>{zoom=Math.max(.35,zoom-.1);render()};$('#fit').onclick=()=>{zoom=Math.max(.35,Math.min(1,($('#viewport').clientWidth-35)/Math.max(1480,...visibleNodes().map(n=>n.x+350))));render();$('#viewport').scrollTo(0,0)};$('#walk').onclick=()=>{walking=!walking;step=0;render()};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-select],[data-deselect],[data-walk-step],#prev-step,#next-step,[data-node]');if(!el||e.target.closest('a,[data-edit],[data-inspect-card],#edit-heading'))return;if(el.hasAttribute('data-select'))activateCard(el.dataset.select,true);else if(el.hasAttribute('data-deselect')){selected=null;render()}else if(el.hasAttribute('data-walk-step')){step=Number(el.dataset.walkStep);renderWalk()}else if(el.id==='prev-step'){step--;renderWalk()}else if(el.id==='next-step'){if(step===sequence().length-1){walking=false;render()}else{step++;renderWalk()}}else if(el.dataset.node&&!dragMoved)activateCard(el.dataset.node);});
 document.addEventListener('keydown',e=>{if(e.target.matches('[data-node]')&&['Enter',' '].includes(e.key)){e.preventDefault();activateCard(e.target.dataset.node)}if(walking&&!e.target.matches('input,textarea,select,[contenteditable]')&&!$('dialog[open]')){if(e.key==='ArrowRight')$('#next-step')?.click();if(e.key==='ArrowLeft')$('#prev-step')?.click();if(e.key==='Escape'){walking=false;render()}}});
@@ -216,13 +220,31 @@ const api={get board(){return board},get session(){return session},workspace,get
 if(!readerMode){import('./guide.js').then(m=>m.init(api)).catch(e=>console.warn('Guide unavailable',e));import('./outline-editor.js').then(m=>m.init(api)).catch(e=>console.warn('Outline unavailable',e));import('./assist.js').then(m=>m.init(api)).catch(e=>console.warn('Local AI drafting unavailable',e));}
 render();updateHistory();
 if(!readerMode){
- const params=new URLSearchParams(location.search);
- if(params.get('author')){author=true;render();}
- if(params.get('walk')){walking=true;render();}
- if(params.get('focus')&&get(params.get('focus')))select(params.get('focus'),true);
- if(params.get('new')||params.get('tab')==='outline'){tab='outline';render();}
+ const params=initialParams;
+ if(params.get('author'))author=true;
+ const t=params.get('tab');if(['map','outline','sources'].includes(t))tab=t;else if(params.get('new'))tab='outline';
+ const z=Number(params.get('zoom'));if(z>=.35&&z<=1.5)zoom=z;
+ if(params.get('walk')){walking=true;step=Math.max(0,parseInt(params.get('step'),10)||0);}
+ const focus=params.get('focus');if(focus&&get(focus))selected=focus;
+ render();
+ if(params.has('sx'))$('#viewport').scrollTo(Number(params.get('sx'))*zoom||0,Number(params.get('sy'))*zoom||0);
+ else if(selected)select(selected,true);
+ // From here the URL mirrors the view; one-shot flags (inbox, error, new) drop out.
+ restored=true;syncUrl();
+ $('#viewport').addEventListener('scroll',()=>{clearTimeout(syncUrl.scrollTimer);syncUrl.scrollTimer=setTimeout(syncUrl,250)},{passive:true});
  if(params.get('inbox'))await showInbox();
  if(params.get('captureError'))notify(params.get('captureError'));
+}
+function syncUrl(){
+ if(readerMode||!restored||!session)return;
+ const p=new URLSearchParams({j:session.journey.id,b:session.record.id});
+ if(tab!=='map')p.set('tab',tab);if(author)p.set('author','1');
+ if(walking){p.set('walk','1');if(step)p.set('step',String(step));}
+ if(selected&&get(selected))p.set('focus',selected);
+ if(Math.abs(zoom-.85)>.001)p.set('zoom',zoom.toFixed(2));
+ const vp=$('#viewport');if(tab==='map'&&!walking&&(vp.scrollLeft||vp.scrollTop)){p.set('sx',String(Math.round(vp.scrollLeft/zoom)));p.set('sy',String(Math.round(vp.scrollTop/zoom)));}
+ const next='?'+p;if(location.search!==next)window.history.replaceState(null,'',next);
+ clearTimeout(syncUrl.saveTimer);syncUrl.saveTimer=setTimeout(()=>workspace.rememberView(location.href,{boardId:session.record.id,title:board.title,journeyId:session.journey.id,journeyName:session.journey.name}),400);
 }
 
 

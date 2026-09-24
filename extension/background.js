@@ -1,4 +1,5 @@
 import { captureEvidence } from './evidence/capture-background.js';
+import { openBoard, resumeBoard, reopenAfterReload, forgetTab } from './evidence/open.js';
 // Research Trail — background service worker.
 //
 // Responsibilities:
@@ -168,8 +169,16 @@ function onBoot() {
   ensureScratch();
 }
 chrome.runtime.onInstalled.addListener(onBoot);
+// Reloading or updating the extension closes its pages: reopen the boards
+// that were open, each at its last view.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'update') reopenAfterReload().catch((e) => console.warn('[Research Trail] reopen boards', e));
+});
+chrome.tabs.onRemoved.addListener((tabId) => { forgetTab(tabId).catch(() => {}); });
 chrome.runtime.onStartup.addListener(() => {
   onBoot();
+  // Tab ids don't survive a browser restart; restored tabs re-register.
+  chrome.storage.local.set({ openBoards: {} });
   rebuildTabState();
 });
 
@@ -282,6 +291,10 @@ async function rewireEdges(keep, idMap) {
 migrateCanonicalUrls().catch((e) => console.error('[Research Trail] canonical migration failed', e));
 
 chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'resume-board') {
+    resumeBoard().catch((e) => console.warn('[Research Trail] resume board', e));
+    return;
+  }
   if (command === 'open-panel') {
     const win = await chrome.windows.getLastFocused();
     chrome.sidePanel.open({ windowId: win.id });
@@ -824,7 +837,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       await captureEvidence(tab, info, journeyId, info.menuItemId === 'capture-evidence');
       notifyTrailUpdated(journeyId);
     } catch (error) { params.set('captureError', error.message); }
-    await chrome.tabs.create({ url: chrome.runtime.getURL('evidence/index.html?' + params) });
+    await openBoard({ j: journeyId }, Object.fromEntries([...params].filter(([k]) => k !== 'j')));
     return;
   }
   if (info.menuItemId !== 'save-highlight' || !info.selectionText || !tab?.url) return;

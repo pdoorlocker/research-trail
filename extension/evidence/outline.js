@@ -1,12 +1,14 @@
 import * as db from '../lib/db.js';
 import { saveJot } from './workspace.js';
+import { openBoard as openBoardTab } from './open.js';
 const $=id=>document.getElementById(id);
 let records=[], journeyId=null, loading=0;
 function openBoard(walk=false){
   const params=new URLSearchParams();if(journeyId)params.set('j',journeyId);
   if($('outline-board').value)params.set('b',$('outline-board').value);
-  if(walk)params.set('walk','1');
-  chrome.tabs.create({url:chrome.runtime.getURL('evidence/index.html?'+params)});
+  // Reuse a tab already showing the board; only a walkthrough request changes its view.
+  const b=params.get('b');params.delete('b');
+  openBoardTab(b?{j:journeyId,b}:{j:journeyId},walk?{walk:'1',step:'0'}:{});
 }
 function renderSteps(){
   const board=records.find(b=>b.id===$('outline-board').value)?.content;
@@ -14,7 +16,7 @@ function renderSteps(){
   for(const id of board?.steps||[]){const card=board.nodes.find(n=>n.id===id);if(!card)continue;
     const li=document.createElement('li'),button=document.createElement('button');button.textContent=card.text;button.onclick=()=>{
       const params=new URLSearchParams({j:journeyId,b:$('outline-board').value,focus:id});
-      chrome.tabs.create({url:chrome.runtime.getURL('evidence/index.html?'+params)});
+      openBoardTab({j:journeyId,b:$('outline-board').value},{focus:id,tab:'map'});
     };li.append(button);$('outline-list').append(li);
   }
   $('outline-present').disabled=!board?.steps.length;
