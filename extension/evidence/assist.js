@@ -274,7 +274,7 @@ export function init(api) {
     for (const p of chosen.filter(p => p.type === 'link')) {
       const from = idOf(p.fromKey), to = idOf(p.toKey);
       if (!from || !to) continue;
-      board.links.push({ id: api.uid(), from, to, kind: p.kind, label: p.why || '' }); count++;
+      board.links.push({ id: api.uid(), from, to, kind: api.fitKind(api.get(from).type, p.kind), label: p.why || '' }); count++;
     }
     if (order) {
       const ids = [...new Set(order.keys.map(idOf).filter(Boolean))];

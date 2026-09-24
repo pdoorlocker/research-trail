@@ -9,9 +9,19 @@
 
 const DEFAULT_TITLE = 'What am I trying to establish?';
 const TYPES = [['note', 'Thought'], ['fact', 'Fact'], ['claim', 'Claim'], ['conclusion', 'Conclusion'], ['gap', 'Question'], ['evidence', 'Quote']];
-const RELATIONS = [['reasoning', 'because'], ['supports', 'evidence'], ['challenges', 'but'], ['questions', 'question']];
-const ALSO_OUT = { reasoning: 'also leads to', supports: 'also evidence for', challenges: 'also challenges', questions: 'also questions' };
-const ALSO_IN = { reasoning: 'also because of', supports: 'also backed by', challenges: 'also challenged by', questions: 'also questioned by' };
+// The connective is derived, not chosen: it follows from the lower line's
+// type, plus whether it argues for or against the line above. Read top to
+// bottom it is plain English: "<line above> because <this line>".
+// A later line arguing the same way as an earlier sibling reads as a
+// continuation ("and because", "but also"); nothing extra is stored.
+const stanceOf = kind => kind === 'challenges' ? 'against' : kind === 'questions' ? 'question' : 'for';
+const connective = (type, kind, again = false) => kind === 'challenges'
+  ? (type === 'evidence' ? (again ? 'but the source also says' : 'but the source says') : (again ? 'but also' : 'but'))
+  : type === 'gap' ? (again ? 'which also raises the question' : 'which raises the question')
+  : (again ? 'and ' : '') + (type === 'evidence' ? 'as the source says' : 'because');
+// Extra connections, phrased from each end.
+const ALSO_OUT = { reasoning: 'is also a reason why', supports: 'is also a source for', challenges: 'also pushes back on', questions: 'is also an open question for' };
+const ALSO_IN = { reasoning: 'also because', supports: 'as another source says', challenges: 'but also', questions: 'which also raises the question' };
 const PREFIX = { '?': 'gap', '>': 'evidence', '!': 'conclusion', '-': 'fact', '~': 'challenge' };
 const COL = 410, GAP_Y = 36, TREE_GAP = 90;
 
@@ -54,7 +64,7 @@ export function init(api) {
     for (const n of missing) n.ord = next++;
   }
 
-  const kindFor = (n, challenge = false) => challenge ? 'challenges' : n.type === 'evidence' ? 'supports' : n.type === 'gap' ? 'questions' : 'reasoning';
+  const kindFor = n => api.allowedKinds(n.type)[0];
   const textOf = n => n.type === 'evidence' ? (n.quote || n.displayedQuote || '') : n.text;
   const lockedQuote = n => n.type === 'evidence' && (n.sourceCaptureId || n.image || (!n.quote && n.displayedQuote));
 
@@ -72,7 +82,7 @@ export function init(api) {
     if (parent.type === 'note') applyType(parent, 'claim');
     const existing = b.links.find(l => l.from === id && l.to === parentId);
     if (existing) { b.links = [existing, ...b.links.filter(l => l !== existing)]; if (kind) existing.kind = kind; return; }
-    b.links.unshift({ id: api.uid(), from: id, to: parentId, kind: kind || (old?.kind === 'challenges' ? 'challenges' : kindFor(n)), label: '' });
+    b.links.unshift({ id: api.uid(), from: id, to: parentId, kind: api.fitKind(n.type, kind || old?.kind || kindFor(n)), label: '' });
   }
 
   function orderBetween(list, index) {
@@ -267,6 +277,8 @@ export function init(api) {
     const hasSource = id => b.links.some(l => l.to === id && l.kind === 'supports' && api.get(l.from)?.type === 'evidence');
     const row = n => {
       const parent = t.parentOf.get(n.id), rel = t.primary.get(n.id)?.kind;
+      const siblings = parent ? t.kids(parent) : [];
+      const again = siblings.slice(0, siblings.indexOf(n)).some(o => stanceOf(t.primary.get(o.id)?.kind) === stanceOf(rel));
       const kids = t.kids(n.id), locked = lockedQuote(n);
       const hint = n.type === 'claim' && !hasSource(n.id) && !kids.some(k => k.type === 'evidence') ? 'no source yet'
         : n.type === 'conclusion' && !kids.length && !b.links.some(l => l.to === n.id) ? 'no reasons yet'
@@ -278,14 +290,16 @@ export function init(api) {
       return `<li class="ol-item" data-id="${esc(n.id)}">
         <div class="ol-row" data-row="${esc(n.id)}">
           <span class="ol-grip" draggable="true" data-grip="${esc(n.id)}" title="Drag onto another line to put it underneath">⠿</span>
-          ${parent ? `<select class="ol-rel rel-${esc(rel)}" data-rel="${esc(n.id)}" aria-label="How this line relates to the line above">${RELATIONS.map(([v, l]) => `<option value="${v}" ${v === rel ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
           <select class="ol-type type-${esc(n.type)}" data-type="${esc(n.id)}" aria-label="Kind of line">${TYPES.map(([v, l]) => `<option value="${v}" ${v === n.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          ${parent ? (n.type === 'gap'
+            ? `<span class="ol-rel is-fixed">${connective(n.type, rel, again)}</span>`
+            : `<button type="button" class="ol-rel rel-${esc(rel)}" data-stance="${esc(n.id)}" title="${rel === 'challenges' ? 'Pushes back on the line above. Click to make it support it instead.' : 'Supports the line above. Click to make it push back instead.'}">${connective(n.type, rel, again)}</button>`) : ''}
           <div class="ol-text ${n.type === 'evidence' ? 'is-quote' : ''}" data-text="${esc(n.id)}" ${locked ? 'tabindex="0" title="Captured wording. Open the editor (✎) to change it."' : 'contenteditable="plaintext-only"'} spellcheck="true" data-placeholder="${n.type === 'evidence' ? 'Paste the exact words…' : 'Type a thought…'}">${esc(textOf(n))}</div>
           ${n.type === 'evidence' && (n.url || n.text) ? `<span class="ol-source">${esc(n.text || '')}${n.url ? ` · ${esc(hostname(n.url))}` : ''}</span>` : ''}
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
-        ${extras.length ? `<div class="ol-extras">${extras.map(([id, label]) => `<button data-goto="${esc(id)}">${esc(label)} ${esc(clip(textOf(api.get(id)) || api.get(id).text, 60))}</button>`).join('')}</div>` : ''}
+        ${extras.length ? `<div class="ol-extras">${extras.map(([id, label]) => `<button data-goto="${esc(id)}">${esc(label)} ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o) || o.text, 60)) + '”' : esc(clip(o.text, 60)))(api.get(id))}</button>`).join('')}</div>` : ''}
         ${kids.length ? `<ul class="ol-children">${kids.map(row).join('')}</ul>` : ''}
       </li>`;
     };
@@ -351,7 +365,7 @@ export function init(api) {
         } else {
           applyType(n, prefix.kind);
           const link = t.primary.get(id);
-          if (link && link.kind !== 'challenges') link.kind = kindFor(n);
+          if (link) link.kind = api.fitKind(n.type, link.kind);
         }
       }, { id, offset: 0 });
     }
@@ -388,18 +402,15 @@ export function init(api) {
   view.addEventListener('focusout', e => { if (e.target.closest('[data-text]')) flushText(); });
 
   view.addEventListener('change', e => {
-    const typeSel = e.target.closest('[data-type]'), relSel = e.target.closest('[data-rel]');
+    const typeSel = e.target.closest('[data-type]');
     if (typeSel) {
       const id = typeSel.dataset.type;
       change(t => {
         const n = api.get(id);
         applyType(n, typeSel.value);
         const link = t.primary.get(id);
-        if (link && link.kind !== 'challenges') link.kind = kindFor(n);
+        if (link) link.kind = api.fitKind(n.type, link.kind);
       }, { id, offset: Infinity });
-    } else if (relSel) {
-      const id = relSel.dataset.rel;
-      change(t => { t.primary.get(id).kind = relSel.value; }, null);
     } else if (e.target.id === 'ol-title') {
       api.board.title = e.target.value.trim() || DEFAULT_TITLE;
       api.persist(); api.render();
@@ -420,8 +431,11 @@ export function init(api) {
   });
 
   view.addEventListener('click', e => {
-    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]');
-    if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
+    const open = e.target.closest('[data-open]'), go = e.target.closest('[data-goto]'), stance = e.target.closest('[data-stance]');
+    if (stance) {
+      const id = stance.dataset.stance;
+      change(t => { const l = t.primary.get(id); l.kind = l.kind === 'challenges' ? kindFor(api.get(id)) : 'challenges'; }, null);
+    } else if (open) { flushText(); const n = api.get(open.dataset.open); api.openCard(n.type, n.id); }
     else if (go) { focus = { id: go.dataset.goto, offset: Infinity }; restoreFocus(); }
     else if (e.target.closest('[data-order-from-outline]')) orderFromOutline();
     else if (e.target.closest('[data-tidy]')) tidy();

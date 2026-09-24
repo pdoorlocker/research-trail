@@ -116,3 +116,9 @@
 #board-title.is-placeholder{color:var(--muted);font-style:italic}
 .ol-row{flex-wrap:wrap}.ol-source{flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ol-title:focus{box-shadow:none!important}
+/* Connectives read as words in a sentence, not tags. */
+.ol-rel{border:0!important;border-bottom:1px dotted var(--muted)!important;border-radius:0!important;padding:0 1px!important;font:italic 15px var(--serif)!important;text-transform:none!important;letter-spacing:0!important;color:var(--muted)!important;background:transparent!important;box-shadow:none!important}
+.ol-rel.rel-challenges{color:var(--red)!important;border-bottom-color:var(--red)!important}
+.ol-rel:hover,.ol-rel:focus-visible{color:var(--ink)!important;border-bottom-style:solid!important}
+.ol-rel,.ol-type{field-sizing:content}.ol-rel{margin-right:-2px}
+.ol-rel{min-height:0!important;cursor:pointer;line-height:1.5}.ol-rel.is-fixed{cursor:default;border-bottom:0!important}
