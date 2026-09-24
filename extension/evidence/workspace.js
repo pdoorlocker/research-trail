@@ -63,7 +63,9 @@ export function evidenceCard(capture, position) {
     x: position.x, y: position.y, sourceCaptureId: capture.id, sourcePageId: capture.pageId || '',
     url: capture.url, quote: original ? capture.quote || '' : '',
     displayedQuote: capture.quote || capture.displayedQuote || '',
-    note: [capture.note, !original && capture.quote ? `Displayed text (original not verified): ${capture.quote}` : ''].filter(Boolean).join('\n'),
+    // The capture's status travels as provenance (shown as a small label),
+    // not as boilerplate in the card's note, which is for your own words.
+    note: '',
     image: capture.image || '', originalImage: capture.image || '', highlights: [],
     tier: 'Unreviewed', checked: '', capturedAt: capture.capturedAt,
     provenance: { view: capture.view || 'original', anchor: capture.anchor || null, frameUrl: capture.frameUrl || capture.url },

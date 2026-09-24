@@ -268,3 +268,6 @@ body.space-pan #viewport{cursor:grab!important}
 .reader-text p{margin:0 0 10px}
 .reader-text ::selection{background:var(--yellow);color:var(--ink)}
 .reader-bar{position:sticky;bottom:0;padding:6px 0;background:var(--card)}
+/* Evidence status label and unverified passages */
+.view-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;border:1px dashed var(--muted);font:10.5px var(--mono);letter-spacing:.03em;color:var(--muted);cursor:help;white-space:nowrap}
+.excerpt.is-unverified mark{background:transparent;color:var(--ink);text-decoration:underline dotted var(--muted);text-underline-offset:4px}
