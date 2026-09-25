@@ -291,8 +291,10 @@ export function init(api) {
     const place = (n, col, y) => {
       if (n.auto) put(n, 30 + col * COL, y);
       let right = y;
-      for (const k of t.details(n.id)) right = place(k, col + 1, right) + GAP_Y;
-      let bottom = Math.max(y + h(n), t.details(n.id).length ? right - GAP_Y : 0);
+      // Folded-away evidence takes no room, so the reasoning closes up.
+      const shown = t.details(n.id).filter(k => !api.isHidden?.(k.id));
+      for (const k of shown) right = place(k, col + 1, right) + GAP_Y;
+      let bottom = Math.max(y + h(n), shown.length ? right - GAP_Y : 0);
       const next = t.continuations(n.id);
       if (next.length === 1) bottom = place(next[0], col, bottom + CHAIN_GAP);
       else for (const k of next) bottom = place(k, col + 1, bottom + GAP_Y);

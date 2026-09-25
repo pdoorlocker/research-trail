@@ -169,6 +169,8 @@ export function init(api) {
       // Reads "[target] because [this]" ("as the source says" for a quote).
       b.links.push({ id: api.uid(), from: attachTo, to: card.id, word: api.fitWord(api.get(attachTo).type, card.type, word), label: '' });
       linked = true;
+      // Show what you just attached, even while evidence is folded away.
+      api.showEvidenceFor?.(attachTo);
     }
     if (!added && !linked) { api.select(card.id, true); return; }
     api.persist();
