@@ -296,3 +296,7 @@ body.space-pan #viewport{cursor:grab!important}
 .evidence-toggle:hover,.evidence-toggle[aria-expanded=true]{color:var(--green);border-color:var(--green)!important}
 .evidence-all{min-height:0;padding:3px 10px;font-size:12px;margin-left:auto;margin-right:12px}
 .evidence-all[aria-pressed=true]{color:var(--green);border-color:var(--green)}
+
+/* Open canvas: no scrollbars; pan with Space+drag or the trackpad */
+#viewport{scrollbar-width:none}#viewport::-webkit-scrollbar{display:none}
+#sizer{overflow:clip}

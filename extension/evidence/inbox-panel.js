@@ -244,7 +244,7 @@ export function init(api) {
     e.preventDefault();
     const card = e.target.closest('#canvas [data-node]');
     const p = api.canvasPoint(e.clientX, e.clientY);
-    place(e.dataTransfer.getData(TYPE), card ? { attachTo: card.dataset.node } : { at: { x: Math.max(0, p.x - 40), y: Math.max(0, p.y - 20) } });
+    place(e.dataTransfer.getData(TYPE), card ? { attachTo: card.dataset.node } : { at: { x: p.x - 40, y: p.y - 20 } });
   });
   const outline = document.getElementById('outline-view');
   outline?.addEventListener('dragover', e => {
