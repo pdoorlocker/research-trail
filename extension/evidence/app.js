@@ -162,6 +162,13 @@ $('#viewport').addEventListener('pointerdown',e=>{const h=e.target.closest('[dat
 function groupControls(ids){if(!author||readerMode)return '';const all=board.groups||[],one=ids.length===1?ids[0]:null,mine=one?groupsOf(one):[],others=all.filter(g=>!ids.every(id=>g.members.includes(id)));
  return `<div class="group-controls"><p class="eyebrow">GROUPS</p>${mine.map(g=>`<span class="group-chip" style="--g:${GROUP_COLORS[g.color%GROUP_COLORS.length]}">${esc(g.label||'Untitled group')}<button data-group-leave="${esc(g.id)}|${esc(one)}" aria-label="Take out of this group">✕</button></span>`).join('')}
  <div class="detail-actions"><button data-group-multi>▭ New group${ids.length>1?` of ${ids.length}`:''}</button>${others.length?`<select data-group-add aria-label="Add to a group"><option value="">Add to group…</option>${others.map(g=>`<option value="${esc(g.id)}">${esc(g.label||'Untitled group')}</option>`).join('')}</select>`:''}</div><p class="ui-hint">⌘G groups the selection.</p></div>`}
+// While dragging cards: the group the pointer is over (the innermost one the
+// cards aren't all in yet) lights up and says what dropping will do.
+function showGroupDrop(ev,ids){const p=canvasAt(ev.clientX,ev.clientY);let best=null,area=Infinity;
+ for(const el of document.querySelectorAll('#canvas .group,#canvas .group-card')){const g=(board.groups||[]).find(x=>x.id===(el.dataset.group||el.dataset.groupCard));if(!g||ids.every(id=>g.members.includes(id)))continue;
+  const x=el.offsetLeft,y=el.offsetTop,w=el.offsetWidth,h=el.offsetHeight;if(p.x<x||p.x>x+w||p.y<y||p.y>y+h||w*h>=area)continue;best={g,el};area=w*h}
+ if(best){best.el.classList.add('drop-target');const tab=best.el.querySelector('.group-tab');tab?.insertAdjacentHTML('beforeend',`<span class="group-drop-hint">＋ Drop to add ${ids.length>1?ids.length+' cards':'this card'}</span>`)}
+ return best?.g||null}
 function renderEdges(){const ids=new Set(visibleNodes().map(n=>n.id)),seenPairs=new Set();const svg=$('#canvas svg');if(!svg)return;svg.innerHTML=`<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="context-stroke"/></marker></defs>`+board.links.map(l=>{const A=endpoint(l.from,ids),B=endpoint(l.to,ids);if(!A||!B||A.key===B.key)return '';if(A.group||B.group){const pair=A.key+'>'+B.key+'>'+l.word;if(seenPairs.has(pair))return '';seenPairs.add(pair)}const a=get(l.from),b=get(l.to),ap=A.p,bp=B.p,ae=A.el,be=B.el;let sx,sy,tx,ty,d;
  if(bp.x>ap.x+ae.offsetWidth-10){sx=ap.x+ae.offsetWidth;sy=ap.y+Math.min(120,ae.offsetHeight)/2;tx=bp.x-6;ty=bp.y+Math.min(120,be.offsetHeight)/2;d=`M${sx},${sy} C${sx+45},${sy} ${tx-45},${ty} ${tx},${ty}`;}else{sx=ap.x+ae.offsetWidth/2;tx=bp.x+be.offsetWidth/2;const down=bp.y>ap.y;sy=ap.y+(down?ae.offsetHeight:0);ty=bp.y+(down?-7:be.offsetHeight+7);d=`M${sx},${sy} C${sx},${(sy+ty)/2} ${tx},${(sy+ty)/2} ${tx},${ty}`;}
  const color={objection:'#ac402d',but:'#a0661c',so:'#2e5b46',answer:'#8a6d1a'}[l.word]||'#817969',dash={and:'6 5',question:'6 5',answer:'2 5',objection:'6 4'}[l.word];return `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" ${dash?'stroke-dasharray="'+dash+'"':''} marker-end="url(#arrow)"/>${`<text class="edge-label k-${l.word}" data-edit-link="${l.id}" text-anchor="middle" x="${(sx+tx)/2}" y="${(sy+ty)/2-10}">${esc(wordLabel(l.word,b.type))}${l.label?' · '+esc(l.label):''}</text>`}`}).join('');
@@ -272,7 +279,7 @@ function removeCards(ids){const gone=new Set(ids);board.nodes=board.nodes.filter
 // Shift/⌘-click is also the browser's "extend text selection" gesture; stop
 // it so adding a card doesn't flash-highlight the text between cards.
 $('#viewport').addEventListener('mousedown',e=>{if((e.shiftKey||e.metaKey||e.ctrlKey)&&author&&!readerMode&&e.target.closest('#canvas [data-node]'))e.preventDefault()});
-let dragMoved=false,spaceDown=false;
+let dragMoved=false,spaceDown=false,dropGroup=null;
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!e.target.matches('input,textarea,select,button,[contenteditable]')&&tab==='map'&&!walking){spaceDown=true;document.body.classList.add('space-pan');e.preventDefault()}});
 document.addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;document.body.classList.remove('space-pan')}});
 $('#viewport').addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('a,button'))return;const vp=$('#viewport'),el=e.target.closest('[data-node]'),n=el&&get(el.dataset.node);if(n&&!author)return;
@@ -281,14 +288,14 @@ $('#viewport').addEventListener('pointerdown',e=>{if(e.button!==0||e.target.clos
  const origin=group.map(g=>({g,x:g.x,y:g.y,el:$(`#canvas [data-node="${CSS.escape(g.id)}"]`)}));
  const boxing=!n&&author&&!readerMode&&!spaceDown,adding=e.shiftKey||e.metaKey||e.ctrlKey;let box=null,hit=null;
  const move=ev=>{const dx=ev.clientX-sx,dy=ev.clientY-sy;if(Math.hypot(dx,dy)<4&&!dragMoved)return;dragMoved=true;
-  if(group.length){for(const o of origin){o.g.x=o.x+dx/zoom;o.g.y=o.y+dy/zoom;const p=pos(o.g);if(o.el){o.el.style.left=p.x+'px';o.el.style.top=p.y+'px'}}renderGroups();renderEdges()}
+  if(group.length){for(const o of origin){o.g.x=o.x+dx/zoom;o.g.y=o.y+dy/zoom;const p=pos(o.g);if(o.el){o.el.style.left=p.x+'px';o.el.style.top=p.y+'px';o.el.classList.add('dragging')}}renderGroups();renderEdges();dropGroup=showGroupDrop(ev,group.map(g=>g.id))}
   else if(boxing){const a=canvasAt(sx,sy),b=canvasAt(ev.clientX,ev.clientY),r={x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:Math.abs(a.x-b.x),h:Math.abs(a.y-b.y)};
    if(!box){box=document.createElement('div');box.className='marquee';$('#canvas').append(box)}Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
    hit=new Set(adding?[...multi,...(selected?[selected]:[])]:[]);for(const m of visibleNodes()){const c=$(`#canvas [data-node="${CSS.escape(m.id)}"]`);if(!c)continue;const p=pos(m);if(p.x<r.x+r.w&&p.x+c.offsetWidth>r.x&&p.y<r.y+r.h&&p.y+c.offsetHeight>r.y)hit.add(m.id)}
    $$('#canvas [data-node]').forEach(c=>c.classList.toggle('selected',hit.has(c.dataset.node)))}
   else{vp.scrollLeft=sl-dx;vp.scrollTop=st-dy}};
  const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);
-  if(group.length&&dragMoved){group.forEach(g=>delete g.auto);persist();setTimeout(render,0)}
+  if(group.length&&dragMoved){group.forEach(g=>delete g.auto);if(dropGroup){dropGroup.members=[...new Set([...dropGroup.members,...group.map(g=>g.id)])];if(dropGroup.collapsed){selected=null;multi.clear()}notify(`Added ${group.length>1?group.length+' cards to':'to'} “${dropGroup.label||'Untitled group'}”.`,{label:'Undo',run:()=>undo()})}persist();setTimeout(render,0)}dropGroup=null;
   if(boxing){box?.remove();if(dragMoved&&hit){const ids=[...hit];multi=new Set(ids.length>1?ids:[]);selected=ids.at(-1)||null;render()}else if(!dragMoved&&!adding&&(multi.size||selected)){multi.clear();selected=null;render()}}
   setTimeout(()=>dragMoved=false,50)};
  window.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true});});
