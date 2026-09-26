@@ -247,6 +247,7 @@ async function loadData(id) {
   if (!$('timeline-view').hidden) renderTimeline();
   $('empty-state').hidden = nodes.length > 0 || showTopics;
   renderAskContext();
+  renderStarred();
   if (selectedNodeId) renderDrawer();
   if (openEdgeId && $('edge-modal').open && !populateEdgeModal(openEdgeId)) {
     $('edge-modal').close(); // edge got deleted under us
@@ -1050,12 +1051,13 @@ function buildElements() {
         id: n.id,
         // Hooks are already written to be short (4-9 words) — only the raw
         // title/host fallback needs a hard cap to stay glanceable.
-        label: n.hook ? truncate(n.hook, 80) : truncate(n.title || n.host, 28),
+        label: (n.starred ? '★ ' : '') + (n.hook ? truncate(n.hook, 80) : truncate(n.title || n.host, 28)),
         parent,
         color: domainColor(h),
         favicon: faviconUrl(n.url, 32),
         size,
         state,
+        starred: !!n.starred,
         domainKey: h,
       },
     });
@@ -1150,6 +1152,11 @@ function graphStyle() {
         'border-opacity': 1,
         'border-color': cssVar('--accent') || '#1a7f37',
       },
+    },
+    {
+      // Starred: the pages you marked as the ones that matter.
+      selector: 'node[?starred]',
+      style: { 'border-width': 5, 'border-opacity': 1, 'border-color': '#d9a441', 'font-weight': 'bold' },
     },
     {
       selector: 'node:selected',
@@ -1709,6 +1716,14 @@ async function finishManualEdge(toId) {
 function wireDrawer() {
   $('drawer-close').onclick = closeDrawer;
   $('d-goto').onclick = () => send({ type: 'focus-node', nodeId: selectedNodeId });
+  $('d-star').onclick = async () => {
+    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (!node) return;
+    node.starred = !node.starred;
+    renderDrawer();
+    renderStarred();
+    await send({ type: 'node-star', nodeId: node.id, starred: node.starred });
+  };
   $('d-connect').onclick = startConnectMode;
   $('d-resummarize').onclick = async () => {
     await send({ type: 'resummarize', nodeId: selectedNodeId });
@@ -1745,6 +1760,9 @@ function renderDrawer() {
   $('d-favicon').src = faviconUrl(node.url);
   $('d-title').textContent = node.title || node.url;
   $('d-title').href = node.url;
+  $('d-star').textContent = node.starred ? '★' : '☆';
+  $('d-star').classList.toggle('on', !!node.starred);
+  $('d-star').title = node.starred ? 'Starred: click to unstar' : 'Star this page so it’s easy to find again';
   $('d-meta').textContent =
     `${node.host} · ${node.visits.length} visit${node.visits.length === 1 ? '' : 's'} · ${formatDuration(node.timeSpent)} reading`;
 
@@ -2240,7 +2258,7 @@ function renderTimeline() {
     main.className = 'tl-main';
     const title = document.createElement('div');
     title.className = 'tl-title';
-    title.textContent = v.node.title || v.node.url;
+    title.textContent = (v.node.starred ? '★ ' : '') + (v.node.title || v.node.url);
     main.appendChild(title);
 
     if (v.from && byId.has(v.from)) {
@@ -2501,3 +2519,42 @@ function toast(text) {
 }
 
 init();
+
+// ---------- Starred pages ----------
+// The pages you starred while reading, newest star first, one click away.
+function renderStarred() {
+  const btn = $('starred-btn'), menu = $('starred-menu');
+  if (!btn || !menu) return;
+  const starred = allNodes.filter((n) => n.starred).sort((a, b) => (b.starredAt || 0) - (a.starredAt || 0));
+  btn.hidden = !starred.length;
+  btn.textContent = `★ Starred ${starred.length}`;
+  menu.textContent = '';
+  for (const n of starred) {
+    const item = document.createElement('button');
+    item.className = 'search-item';
+    const img = document.createElement('img');
+    img.src = faviconUrl(n.url, 16);
+    img.alt = '';
+    const main = document.createElement('div');
+    main.className = 's-main';
+    const title = document.createElement('div');
+    title.className = 's-title';
+    title.textContent = n.hook || n.title || n.host;
+    const sub = document.createElement('div');
+    sub.className = 's-sub';
+    sub.textContent = n.hook && n.title ? `${n.title} · ${n.host}` : n.host;
+    main.append(title, sub);
+    item.append(img, main);
+    item.onclick = () => {
+      menu.hidden = true;
+      openSearchResult({ id: n.id, journeyId: n.journeyId, topicId: n.topicId });
+    };
+    menu.appendChild(item);
+  }
+}
+document.addEventListener('click', (e) => {
+  const menu = $('starred-menu');
+  if (!menu) return;
+  if (e.target.closest('#starred-btn')) { menu.hidden = !menu.hidden; return; }
+  if (!e.target.closest('#starred-menu')) menu.hidden = true;
+});

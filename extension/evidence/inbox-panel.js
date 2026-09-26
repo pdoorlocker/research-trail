@@ -26,7 +26,8 @@ export function init(api) {
     loading = true;
     try {
       [captures, pages] = await Promise.all([api.workspace.inbox(api.session.journey.id), api.workspace.trailPages(api.session.journey.id)]);
-      pages.sort((a, b) => visited(b) - visited(a));
+      // Starred pages (marked while reading) first, then most recent.
+      pages.sort((a, b) => (!!b.starred - !!a.starred) || visited(b) - visited(a));
     } catch { captures = []; pages = []; }
     loading = false;
     draw();
@@ -86,7 +87,7 @@ export function init(api) {
         const used = !!onBoard({ id: 'page:' + p.id });
         return `<li class="inbox-card ${used ? 'is-used' : ''}" draggable="true" data-capture="page:${esc(p.id)}">
           <p class="inbox-meta">${esc([domain(p.url), visited(p) ? new Date(visited(p)).toLocaleDateString() : '', used ? 'on board' : ''].filter(Boolean).join(' · '))}</p>
-          <p class="inbox-page-title">${esc(clip(p.title || p.url, 100))}</p>
+          <p class="inbox-page-title">${p.starred ? '<span class="inbox-star" title="You starred this page">★</span> ' : ''}${esc(clip(p.title || p.url, 100))}</p>
           ${p.text || p.excerpt ? `<p class="inbox-snippet">${snippet(p)}</p>` : ''}
           <div class="inbox-actions"><button data-place="page:${esc(p.id)}">${used ? 'Select on board' : 'Add as source'}</button>${p.text ? `<button data-read="${esc(p.id)}">Pick a passage</button>` : ''}</div>
         </li>`;

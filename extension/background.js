@@ -62,6 +62,7 @@ function setupContextMenu() {
     // evidence inbox, and shows on the page in the browsing trail.
     chrome.contextMenus.create({ id: 'save-passage', title: 'Save passage as evidence', contexts: ['selection'] });
     chrome.contextMenus.create({ id: 'capture-evidence', title: 'Save screenshot as evidence', contexts: ['page', 'selection'] });
+    chrome.contextMenus.create({ id: 'star-page', title: '★ Star / unstar this page', contexts: ['page'] });
   });
 }
 
@@ -125,6 +126,78 @@ async function rebuildTabState() {
     }
   }
   notifyTabsUpdated();
+}
+
+// ---------- Starring ----------
+// A star marks a page that feels consequential while you're reading it, so
+// it's easy to find again: on the trail map, in the evidence inbox, and in
+// the toolbar badge while you're on it. Starring a page that isn't on the
+// trail yet adds it first.
+async function setStarBadge(tabId, starred) {
+  try {
+    await chrome.action.setBadgeText({ tabId, text: starred ? '★' : '' });
+    if (starred) await chrome.action.setBadgeBackgroundColor({ tabId, color: '#b58324' });
+  } catch { /* tab gone */ }
+}
+
+async function toggleStar(tab, { toast = true } = {}) {
+  if (!tab?.id) return { error: 'No page to star.' };
+  let tabState = await sget('tabState', {});
+  let nodeId = tabState[tab.id]?.nodeId;
+  if (!nodeId) {
+    const journeyId = (await workspaceOfTab(tab)) || (await ensureActiveWorkspace());
+    if (!(await adoptTab(tab, journeyId))) return { error: 'This page can’t be saved to the trail.' };
+    tabState = await sget('tabState', {});
+    nodeId = tabState[tab.id]?.nodeId;
+  }
+  const node = nodeId && await db.get('nodes', nodeId);
+  if (!node) return { error: 'This page can’t be saved to the trail.' };
+  node.starred = !node.starred;
+  if (node.starred) node.starredAt = Date.now(); else delete node.starredAt;
+  await db.put('nodes', node);
+  await setStarBadge(tab.id, node.starred);
+  notifyTrailUpdated(node.journeyId);
+  const journey = await db.get('journeys', node.journeyId);
+  if (toast) {
+    chrome.scripting.executeScript({ target: { tabId: tab.id }, func: showStarToast, args: [{ starred: node.starred, journeyName: journey?.name || 'your trail' }] }).catch(() => {});
+  }
+  return { starred: node.starred, journeyName: journey?.name };
+}
+
+// Runs in the page (self-contained): a small confirmation with Undo.
+function showStarToast({ starred, journeyName }) {
+  document.getElementById('ttwl-star-toast')?.remove();
+  const host = document.createElement('div');
+  host.id = 'ttwl-star-toast';
+  const root = host.attachShadow({ mode: 'open' });
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  root.innerHTML = `<style>
+    .t{position:fixed;top:14px;right:16px;z-index:2147483647;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 12px;border-radius:10px;
+      background:#20231f;color:#f5f2ea;border:1px solid #ffffff29;box-shadow:0 8px 26px #0000004d;font:13px/1.35 system-ui,-apple-system,sans-serif;animation:in .2s ease-out}
+    @keyframes in{from{opacity:0;transform:translateY(-8px)}}
+    .s{color:#e8b64c;font-size:15px}b{font-weight:600}
+    button{font:600 12px system-ui,sans-serif;border-radius:6px;padding:4px 9px;cursor:pointer;border:1px solid #ffffff40;background:transparent;color:inherit}
+    button:hover{background:#ffffff1a}</style>
+    <div class="t" role="status"><span class="s">${starred ? '★' : '☆'}</span><span>${starred ? `Starred in <b>${esc(journeyName)}</b>` : 'Star removed'}</span><button>Undo</button></div>`;
+  document.documentElement.append(host);
+  const timer = setTimeout(() => host.remove(), 3500);
+  root.querySelector('button').onclick = () => {
+    clearTimeout(timer);
+    host.remove();
+    chrome.runtime.sendMessage({ type: 'star-toggle', quiet: true });
+  };
+}
+
+// The workspace whose tab group a tab sits in, if any. Where you're clicking
+// decides where pages go: a tab inside "Project X"'s group records into
+// Project X, whatever the popup last showed.
+async function workspaceOfTab(tab) {
+  if (!tab || tab.groupId == null || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) return null;
+  const wsGroups = await sget('wsGroups', {});
+  const entry = Object.entries(wsGroups).find(([, gid]) => gid === tab.groupId);
+  if (!entry) return null;
+  const journeyId = entry[0].slice(entry[0].indexOf(':') + 1);
+  return (await db.get('journeys', journeyId)) ? journeyId : null;
 }
 
 // Capture an already-open tab into a workspace without any navigation —
@@ -290,6 +363,11 @@ async function rewireEdges(keep, idMap) {
 migrateCanonicalUrls().catch((e) => console.error('[Research Trail] canonical migration failed', e));
 
 chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'star-page') {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    toggleStar(tab).catch((e) => console.warn('[Research Trail] star', e));
+    return;
+  }
   if (command === 'resume-board') {
     resumeBoard().catch((e) => console.warn('[Research Trail] resume board', e));
     return;
@@ -311,7 +389,7 @@ function notifyTabsUpdated() {
   }, 300);
 }
 
-async function switchWorkspace(journeyId) {
+async function switchWorkspace(journeyId, { collapse = true } = {}) {
   await flushFocusTime();
   await setFocus(null, null);
   await sset('openers', {});
@@ -321,7 +399,7 @@ async function switchWorkspace(journeyId) {
   await rebuildTabState();
   // Mirror in the tab strip: collapse other workspaces' groups, expand this one.
   const settings = await getSettings();
-  if (settings.tabGroupSync) {
+  if (settings.tabGroupSync && collapse) {
     const wsGroups = await sget('wsGroups', {});
     for (const [key, gid] of Object.entries(wsGroups)) {
       const jid = key.slice(key.indexOf(':') + 1);
@@ -440,6 +518,14 @@ async function refocusTab(tabId) {
 }
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  // Switching to a tab in another workspace's group makes that workspace the
+  // current one (without collapsing any groups: you're just moving around).
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const groupJourney = await workspaceOfTab(tab);
+    const { activeJourneyId, paused } = await getActive();
+    if (groupJourney && groupJourney !== activeJourneyId && !paused) await switchWorkspace(groupJourney, { collapse: false });
+  } catch { /* tab gone */ }
   await refocusTab(tabId);
   const tabState = await sget('tabState', {});
   if (tabState[tabId]?.nodeId) maybeCaptureThumb(tabId, tabState[tabId].nodeId);
@@ -528,6 +614,7 @@ async function handleNavigation(details) {
 
   const settings = await getSettings();
   if (!activeJourneyId || paused || !isCapturable(url, settings.blocklist)) {
+    setStarBadge(tabId, false);
     delete tabState[tabId];
     await sset('tabState', tabState);
     if (focus?.tabId === tabId) await setFocus(tabId, null);
@@ -536,11 +623,18 @@ async function handleNavigation(details) {
   }
 
   // Never capture incognito, even if the user enabled the extension there.
+  let tab;
   try {
-    const tab = await chrome.tabs.get(tabId);
+    tab = await chrome.tabs.get(tabId);
     if (tab.incognito) return;
   } catch {
     return; // tab already gone
+  }
+  // A tab inside a workspace's tab group records into that workspace.
+  const groupJourney = await workspaceOfTab(tab);
+  if (groupJourney && groupJourney !== activeJourneyId) {
+    await switchWorkspace(groupJourney, { collapse: false });
+    tabState = await sget('tabState', {});
   }
 
   const prevNodeId = tabState[tabId]?.nodeId || null;
@@ -554,8 +648,8 @@ async function handleNavigation(details) {
   // Scratch, not in whatever workspace happened to be left active. Clicking
   // onward from a workspace page never triggers this, no matter how long
   // you spent reading.
-  let journeyId = activeJourneyId;
-  if (!cameFromTracked) {
+  let journeyId = groupJourney || activeJourneyId;
+  if (!cameFromTracked && !groupJourney) {
     const gapMs = (settings.autoReturnMinutes ?? 30) * 60 * 1000;
     const { lastCaptureAt = 0 } = await chrome.storage.local.get('lastCaptureAt');
     if (gapMs > 0 && lastCaptureAt && Date.now() - lastCaptureAt > gapMs) {
@@ -585,7 +679,8 @@ async function handleNavigation(details) {
     edgeFrom = prevNodeId;
     edgeType = 'navigated';
   }
-  if (edgeFrom && edgeFrom !== node.id) {
+  // Only connect pages within one workspace's trail.
+  if (edgeFrom && edgeFrom !== node.id && (await db.get('nodes', edgeFrom))?.journeyId === journeyId) {
     await upsertEdge(journeyId, edgeFrom, node.id, edgeType);
   }
 
@@ -594,6 +689,7 @@ async function handleNavigation(details) {
 
   tabState[tabId] = { nodeId: node.id, url: canon, rawUrl: url };
   await sset('tabState', tabState);
+  setStarBadge(tabId, !!node.starred);
   if (!focus || focus.tabId === tabId) await setFocus(tabId, node.id);
 
   ensureTabInWorkspaceGroup(tabId, journeyId).catch(() => {});
@@ -851,6 +947,7 @@ async function recordOnTrail(capture) {
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'star-page') { toggleStar(tab).catch((e) => console.warn('[Research Trail] star', e)); return; }
   if (!['save-passage', 'capture-evidence'].includes(info.menuItemId)) return;
   const screenshot = info.menuItemId === 'capture-evidence';
   const target = await captureTarget();
@@ -924,6 +1021,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleMessage(msg, sender) {
   switch (msg.type) {
+    case 'star-toggle': {
+      const tab = msg.tabId ? await chrome.tabs.get(msg.tabId) : sender.tab;
+      return toggleStar(tab, { toast: !msg.quiet });
+    }
+    case 'star-status': {
+      const tabState = await sget('tabState', {});
+      const nodeId = tabState[msg.tabId]?.nodeId;
+      const node = nodeId ? await db.get('nodes', nodeId) : null;
+      return { starred: !!node?.starred, onTrail: !!node };
+    }
+    case 'node-star': {
+      const node = await db.get('nodes', msg.nodeId);
+      if (!node) return { error: 'Page not found.' };
+      node.starred = !!msg.starred;
+      if (node.starred) node.starredAt = Date.now(); else delete node.starredAt;
+      await db.put('nodes', node);
+      const tabState = await sget('tabState', {});
+      for (const [tid, st] of Object.entries(tabState)) if (st.nodeId === node.id) setStarBadge(Number(tid), node.starred);
+      notifyTrailUpdated(node.journeyId);
+      return { starred: node.starred };
+    }
     case 'capture-attach-options':
       return attachOptions(msg);
 

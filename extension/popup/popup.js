@@ -191,3 +191,20 @@ $('ah-translate-btn').onclick = async () => {
 };
 
 renderAmtshelfer();
+
+// Star the page you're on: a quick mark for "this one matters".
+async function renderStar() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const btn = $('star-btn');
+  if (!tab?.url || !/^https?:/.test(tab.url)) return;
+  const { starred } = await send({ type: 'star-status', tabId: tab.id });
+  btn.hidden = false;
+  btn.classList.toggle('on', !!starred);
+  btn.textContent = starred ? '★ Starred · click to unstar' : '☆ Star this page';
+  btn.onclick = async () => {
+    const res = await send({ type: 'star-toggle', tabId: tab.id });
+    if (res?.error) { btn.textContent = res.error; return; }
+    renderStar();
+  };
+}
+renderStar();

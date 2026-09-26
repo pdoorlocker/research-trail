@@ -758,3 +758,9 @@ dialog input[type="checkbox"] { margin-right: 6px; }
   z-index: 100;
   box-shadow: 0 6px 20px rgba(0,0,0,.25);
 }
+
+/* Starred pages */
+.starred-btn{color:#b58324;border-color:#d9a441}
+#starred-menu{min-width:320px;max-height:60vh;overflow:auto}
+.star-toggle{font-size:18px;line-height:1;padding:2px 6px;color:var(--muted,#888)}
+.star-toggle.on{color:#d9a441}

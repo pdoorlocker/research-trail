@@ -15,6 +15,7 @@
       <input id="search" type="search" placeholder="Search all pages…  ( / )" spellcheck="false" autocomplete="off">
       <div id="search-results" class="menu" hidden></div>
     </div>
+    <div class="menu-wrap"><button id="starred-btn" class="starred-btn" hidden title="Pages you starred while reading">★ Starred</button><div id="starred-menu" class="menu" hidden></div></div>
     <span class="spacer"></span>
     <span id="job-status" class="job-status" title="Ollama job queue"></span>
     <button id="synthesize-btn" title="The AI reads every page and writes an overview: key threads, tensions, gaps">Summarize journey</button>
@@ -126,6 +127,7 @@
       <div class="drawer-head">
         <img id="d-favicon" width="18" height="18" alt="">
         <a id="d-title" target="_blank" rel="noreferrer"></a>
+        <button id="d-star" class="ghost star-toggle" aria-label="Star this page">☆</button>
         <button id="drawer-close" class="ghost">Close</button>
       </div>
       <div id="d-hook" hidden></div>

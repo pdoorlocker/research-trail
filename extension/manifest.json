@@ -43,6 +43,12 @@
         "default": "Alt+Shift+R"
       },
       "description": "Resume the evidence board you were last working on"
+    },
+    "star-page": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Star the page you're on (or unstar it)"
     }
   },
   "host_permissions": ["<all_urls>"],

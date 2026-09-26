@@ -398,3 +398,5 @@ main.panel-idle>#inspector,main.panel-idle>#side-splitter{display:none}
 .quick-add kbd{font:11px var(--mono);color:var(--muted);border:1px solid var(--rule);border-radius:4px;padding:0 5px}
 .quick-add-in{margin:-4px 8px 6px;font-size:12px;color:var(--muted)}
 .quick-add{max-width:280px}
+.group-card{margin-top:calc(30px * var(--gz,1) - 4px)}
+.inbox-star{color:#d9a441}
