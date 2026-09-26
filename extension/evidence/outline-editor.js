@@ -274,8 +274,12 @@ export function init(api) {
     return 85 + lines(n.text, 24) * 29 + (n.note ? 20 : 0);
   }
   function height(n) {
+    // Zoomed far out, cards grow to keep headlines readable; lay out with
+    // their normal size.
+    const known = api.cardSize?.(n.id);
+    if (known) return known.h;
     const el = document.querySelector(`#canvas [data-node="${CSS.escape(n.id)}"]`);
-    return el?.offsetHeight || estimate(n);
+    return el && !el.closest('#canvas.far') ? el.offsetHeight : estimate(n);
   }
 
   function layout(measured) {

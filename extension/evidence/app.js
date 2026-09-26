@@ -65,14 +65,14 @@ const wording=n=>n.dynamic==='kind'?(board.kind==='trade'?'Self-employed with a 
 // origin is where canvas (0,0) sits inside the scrolled area.
 let bounds={x:0,y:0,w:800,h:600},origin=null,vpSize={w:1000,h:700},zoomTarget=null,zoomFrame=0;
 const ZOOM_MIN=.15,ZOOM_MAX=2,clampZoom=z=>Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));
-function measureBounds(){const cs=[...document.querySelectorAll('#canvas [data-node],#canvas .group,#canvas .group-card')];if(!cs.length){bounds={x:0,y:0,w:800,h:600};return}let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const c of cs){x0=Math.min(x0,c.offsetLeft);y0=Math.min(y0,c.offsetTop);x1=Math.max(x1,c.offsetLeft+c.offsetWidth);y1=Math.max(y1,c.offsetTop+c.offsetHeight)}bounds={x:x0,y:y0,w:x1-x0,h:y1-y0}}
+function measureBounds(){const cs=[...document.querySelectorAll('#canvas [data-node],#canvas .group,#canvas .group-card')];if(!cs.length){bounds={x:0,y:0,w:800,h:600};return}let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;const far=$('#canvas')?.classList.contains('far');for(const c of cs){if(far);else if(c.dataset.node)sizeCache.set(c.dataset.node,{w:c.offsetWidth,h:c.offsetHeight});else if(c.dataset.groupCard)sizeCache.set('g:'+c.dataset.groupCard,{w:c.offsetWidth,h:c.offsetHeight});x0=Math.min(x0,c.offsetLeft);y0=Math.min(y0,c.offsetTop);x1=Math.max(x1,c.offsetLeft+c.offsetWidth);y1=Math.max(y1,c.offsetTop+c.offsetHeight)}bounds={x:x0,y:y0,w:x1-x0,h:y1-y0}}
 // Keeps the canvas point under `at` (viewport pixels; default the centre) in place.
 function layoutCanvas(at){const vp=document.getElementById('viewport');if(vp.hidden||!vp.clientWidth)return;vpSize={w:vp.clientWidth,h:vp.clientHeight};
  const keep=at||{cx:vpSize.w/2,cy:vpSize.h/2},prev=origin&&{x:(vp.scrollLeft+keep.cx-origin.x)/origin.zoom,y:(vp.scrollTop+keep.cy-origin.y)/origin.zoom};
  const mx=vpSize.w/2,my=vpSize.h/2;origin={x:mx-bounds.x*zoom,y:my-bounds.y*zoom,zoom};
- const c=document.getElementById('canvas');c.style.left=origin.x+'px';c.style.top=origin.y+'px';c.style.transform=`scale(${zoom})`;c.style.setProperty('--gz',Math.max(1,.85/zoom));c.style.setProperty('--inv',1/zoom);const wasFar=c.classList.contains('far');c.classList.toggle('far',zoom<.5);
+ const c=document.getElementById('canvas');c.style.left=origin.x+'px';c.style.top=origin.y+'px';c.style.transform=`scale(${zoom})`;c.style.setProperty('--gz',Math.max(1,.85/zoom));c.style.setProperty('--inv',1/zoom);const wasFar=c.classList.contains('far');c.classList.toggle('far',zoom<.5&&!tidyGroups.measuring);
  // Far out, headlines keep a minimum size, so cards change height as you zoom.
- if((wasFar||zoom<.5)&&!layoutCanvas.inRender){renderGroups();renderEdges()}
+ if((wasFar||zoom<.85)&&!layoutCanvas.inRender){renderGroups();renderEdges()}
  const sz=document.getElementById('sizer');sz.style.width=bounds.w*zoom+2*mx+'px';sz.style.height=bounds.h*zoom+2*my+'px';document.getElementById('zoom-label').textContent=Math.round(zoom*100)+'%';
  if(prev){vp.scrollLeft=origin.x+prev.x*zoom-keep.cx;vp.scrollTop=origin.y+prev.y*zoom-keep.cy}else{vp.scrollLeft=mx-40;vp.scrollTop=my-40}}
 const viewAt=()=>{const vp=document.getElementById('viewport');return {x:(vp.scrollLeft-(origin?.x||0))/zoom,y:(vp.scrollTop-(origin?.y||0))/zoom}};
@@ -80,7 +80,11 @@ function scrollToCanvas(x,y,smooth){if(!origin)return;document.getElementById('v
 // Glides toward the target zoom (⌘/Ctrl+scroll, trackpad pinch, the +/− buttons).
 function zoomTo(z,at){zoomTarget=clampZoom(z);if(zoomFrame)return;const step=()=>{const d=zoomTarget-zoom;zoom=Math.abs(d)<.002?zoomTarget:zoom+d*.35;layoutCanvas(zoomAnchor);if(zoom!==zoomTarget)zoomFrame=requestAnimationFrame(step);else{zoomFrame=0;syncUrl()}};zoomAnchor=at;zoomFrame=requestAnimationFrame(step)}
 let zoomAnchor;
-const pos=n=>({x:n.x,y:n.y+(allRoutes&&n.route?(['A','B','C'].indexOf(n.route))*1050:0)});
+const basePos=n=>({x:n.x,y:n.y+(allRoutes&&n.route?(['A','B','C'].indexOf(n.route))*1050:0)});
+// Where a card is drawn: its saved place (the board with every group open),
+// shifted by any room collapsed groups gave back.
+const pos=n=>{const p=basePos(n),s=foldShift.get(n.id);return s?{x:p.x+s.x,y:p.y+s.y}:p};
+const foldShift=new Map(),foldCardAt=new Map(),sizeCache=new Map();let animateNext=false;
 // The walkthrough follows the level you're on: inside a group, just its steps
 // (or, if none were ordered, its lines in outline order).
 const sequence=()=>{const all=board.steps.map(get).filter(n=>n&&active(n)),g=typeof focusGroup!=='undefined'&&focusGroup&&groupById(focusGroup);if(!g)return all;const ids=new Set(allCards(g)),mine=all.filter(n=>ids.has(n.id));
@@ -103,6 +107,7 @@ function render(){for(const id of multi)if(!get(id))multi.delete(id);for(const i
  $('#view').setAttribute('aria-pressed',!author);$('#author').setAttribute('aria-pressed',author);$('#authorbar').hidden=!author||walking||tab==='outline';$('#walk').textContent=walking?'■ End walkthrough':'▶ Walk through';
  $('#viewport').hidden=walking||tab!=='map';if($('#outline-view')){$('#outline-view').hidden=walking||tab!=='outline';$('#outline-tab').classList.toggle('active',tab==='outline');$('#outline-tab').hidden=readerMode}$('#source-list').hidden=walking||tab!=='sources';$('#walkthrough').hidden=!walking;$('.canvas-footer').hidden=walking||tab!=='map';$('.board-bar').hidden=walking;
  $('#map-tab').classList.toggle('active',tab==='map');$('#sources-tab').classList.toggle('active',tab==='sources');$('#source-count').textContent=board.nodes.filter(n=>n.type==='evidence').length;
+ computeFold();const flipFrom=animateNext?snapshotPlaces():null;animateNext=false;
  const nodes=visibleNodes();let width=Math.max(1480,...nodes.map(n=>n.x+360)),height=Math.max(850,...nodes.map(n=>pos(n).y+460));
  $('#canvas').style.width=width+'px';$('#canvas').style.height=height+'px';
  $('#canvas').innerHTML=`<svg width="${width}" height="${height}" aria-hidden="true"></svg>${board.sample?`<div class="lane-label" style="left:30px;top:55px">01 / YOUR FACTS</div><div class="lane-label" style="left:340px;top:55px">02 / THE RULES & THEIR SOURCES</div><div class="lane-label" style="left:1100px;top:55px">03 / WHAT FOLLOWS</div>`:''}${nodes.map(n=>card(n)).join('')}${!board.nodes.some(active)?'<div class="empty"><h2>Start with a question.<br>Build from the evidence.</h2><p>Add a fact, a claim, or a source using the authoring toolbar.</p>'+(readerMode?'':'<div class="empty-actions"><button class="dark" data-open-outline>✎ Start jotting</button><button data-guide="tour">▶ Take the guided tour</button><button data-guide="primer">How this works</button><button data-guide="author">Start authoring</button></div>')+'</div>':''}`;
@@ -111,7 +116,7 @@ function render(){for(const id of multi)if(!get(id))multi.delete(id);for(const i
  $('.legend').innerHTML='<span>Read each arrow as a sentence: <em>[from] word [to]</em> · click a word to change it</span>';
  if($('#mode-hint')&&$('#author'))$('#author').title=$('#mode-hint').textContent;if($('#compact-title')){const g=focusGroup&&groupById(focusGroup),ans=g?faceOf(g):mainConclusion();$('#compact-title').textContent=(g?g.label||'Untitled group':board.title==='What am I trying to establish?'?'Untitled question':board.title)+(ans?' → '+wording(ans):'')}
  {const b=$('#evidence-all');if(b){b.hidden=!board.nodes.some(x=>x.type==='evidence')||tab!=='map';b.textContent=evidenceView.all?'Hide evidence':'Show all evidence';b.setAttribute('aria-pressed',String(evidenceView.all))}}
- renderGroups();measureBounds();layoutCanvas.inRender=true;layoutCanvas();layoutCanvas.inRender=false;
+ renderGroups();measureBounds();layoutCanvas.inRender=true;layoutCanvas();layoutCanvas.inRender=false;if(flipFrom)playFlip(flipFrom);
  renderEdges();renderInspector();if(walking)renderWalk();
  // Tool buttons carry an icon and a label; the label hides when the board is narrow.
  if(document.body.classList.contains('compact-chrome'))for(const [id,icon] of [['#assist-open','✦'],['#layout-spacing','↔'],['#order-steps','⇅'],['#walk',walking?'■':'▶']]){const b=$(id);if(!b||b.querySelector('.l')&&b.dataset.icon===icon)continue;const label=b.textContent.replace(/^[✦↔⇅▶■]\s*/,'').trim();b.dataset.icon=icon;b.title=label;b.innerHTML=`<span class="i" aria-hidden="true">${icon}</span><span class="l"> ${esc(label)}</span>`}
@@ -151,13 +156,61 @@ function groupHead(g){const edit=author&&!readerMode,parent=parentOf(g);
  return `<div class="group-tab" data-group-drag="${esc(g.id)}" style="--g:${groupColor(g)}"><button class="group-fold" data-group-fold="${esc(g.id)}" aria-label="${g.collapsed?'Expand':'Collapse'} group" title="${g.collapsed?'Expand':'Collapse into its face card'}">${g.collapsed?'▸':'▾'}</button><span class="group-label" data-group-rename="${esc(g.id)}" title="${edit?'Double-click to rename · drag to move the group':''}">${esc(g.label||'Untitled group')}</span><button class="group-focus" data-group-focus="${esc(g.id)}" aria-label="Focus on this group" title="Focus on this group">⤢</button>${edit?`<button class="group-color" data-group-color="${esc(g.id)}" aria-label="Change colour" title="Change colour"></button>${parent?`<button class="group-out" data-group-out="${esc(g.id)}" aria-label="Take out of ${esc(parent.label||'its group')}" title="Take out of “${esc(parent.label||'Untitled group')}”">⇱</button>`:''}<button class="group-remove" data-group-remove="${esc(g.id)}" aria-label="Ungroup" title="Ungroup (keeps the cards)">✕</button>`:''}</div>`}
 function cleanGroups(){const gs=groupList();for(const g of gs){g.members=g.members.filter(id=>get(id));g.groups=(g.groups||[]).filter(id=>groupById(id)&&id!==g.id)}
  board.groups=gs.filter(g=>allCards(g).length);if(focusGroup&&!groupById(focusGroup))focusGroup=null}
+// Moves slide (about 200ms) so you can see what went where when groups fold,
+// open or tidy up. Cards that appear fade in; connections fade in after.
+const placeKey=e=>e.dataset.node?'n:'+e.dataset.node:e.dataset.groupCard?'c:'+e.dataset.groupCard:e.dataset.group?'r:'+e.dataset.group:null;
+function snapshotPlaces(){const m=new Map();for(const e of $$('#canvas [data-node],#canvas .group,#canvas .group-card')){const k=placeKey(e);if(k)m.set(k,{x:e.offsetLeft,y:e.offsetTop,w:e.offsetWidth,h:e.offsetHeight})}return m}
+function playFlip(from){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;const els=$$('#canvas [data-node],#canvas .group,#canvas .group-card');
+ for(const e of els){const k=placeKey(e),a=k&&from.get(k);if(a){const dx=a.x-e.offsetLeft,dy=a.y-e.offsetTop;if(!dx&&!dy&&a.w===e.offsetWidth&&a.h===e.offsetHeight)continue;e.style.transformOrigin='0 0';e.style.transform=`translate(${dx}px,${dy}px) scale(${a.w/Math.max(1,e.offsetWidth)},${a.h/Math.max(1,e.offsetHeight)})`}else e.style.opacity='0'}
+ for(const sv of $$('#canvas > svg'))sv.style.opacity='0';
+ requestAnimationFrame(()=>{for(const e of els){e.style.transition='transform .22s ease, opacity .22s ease';e.style.transform='';e.style.opacity=''}for(const sv of $$('#canvas > svg')){sv.style.transition='opacity .2s ease .18s';sv.style.opacity=''}
+  setTimeout(()=>{for(const e of els){e.style.transition='';e.style.transformOrigin=''}},260)})}
+// Room above each level for the tab of the group inside it; the tabs grow
+// when zoomed out, so the room does too.
+const tabRoom=()=>26*Math.max(1,.85/zoom);
+const groupPad=level=>({side:16+18*level,top:16+level*(tabRoom()+12)});
+const groupDepth=(g,seen=new Set())=>{if(seen.has(g.id))return 0;seen.add(g.id);return Math.max(0,...(g.groups||[]).map(groupById).filter(k=>k&&!k.collapsed).map(k=>1+groupDepth(k,seen)))};
+const sizeOf=id=>sizeCache.get(id)||{w:300,h:170};
+// A group's outline with every card showing, from saved places.
+function openBox(g){const ns=allCards(g).map(get).filter(n=>n&&active(n)&&!evidenceHidden(n));if(!ns.length)return null;const pad=groupPad(groupDepth(g)),ps=ns.map(n=>({...basePos(n),...sizeOf(n.id)}));
+ return {x:Math.min(...ps.map(p=>p.x))-pad.side,y:Math.min(...ps.map(p=>p.y))-pad.top,r:Math.max(...ps.map(p=>p.x+p.w))+pad.side,b:Math.max(...ps.map(p=>p.y+p.h))+pad.side,cx:Math.min(...ps.map(p=>p.x)),cy:Math.min(...ps.map(p=>p.y))}}
+// Folding: a collapsed top-level group gives back the room it no longer needs.
+// What sits to its right (in its rows) slides left; what sits below it (in its
+// columns) slides up. Opening it reverses that exactly, since saved places
+// always describe the board with every group open. Anything that would land
+// on something else stays put.
+function computeFold(){foldShift.clear();foldCardAt.clear();if(tab!=='map'||walking)return;const top=groupList().filter(g=>!parentOf(g)),folded=top.filter(g=>g.collapsed);
+ for(const g of groupList())if(g.collapsed){const b=openBox(g);if(b)foldCardAt.set(g.id,{x:b.cx,y:b.cy})}
+ if(!folded.length)return;const grouped=new Set(top.flatMap(g=>allCards(g)));
+ const units=[...top.map(g=>{const b=openBox(g);if(!b)return null;if(g.collapsed){const c=sizeOf('g:'+g.id),w=c.w||320,h=(c.h||190)+30;return {g,ids:allCards(g),box:{x:b.cx,y:b.cy-30,r:b.cx+w,b:b.cy-30+h},open:b}}return {g,ids:allCards(g),box:b}}),
+  ...board.nodes.filter(n=>active(n)&&!grouped.has(n.id)).map(n=>{const p=basePos(n),z=sizeOf(n.id);return {ids:[n.id],box:{x:p.x,y:p.y,r:p.x+z.w,b:p.y+z.h}}})].filter(Boolean);
+ const overlapX=(a,b)=>a.x<b.r&&a.r>b.x,overlapY=(a,b)=>a.y<b.b&&a.b>b.y;
+ for(const u of units){u.sx=0;u.sy=0}
+ for(const f of units.filter(u=>u.open)){const E=f.open,dx=Math.max(0,E.r-f.box.r-16),dy=Math.max(0,E.b-f.box.b-16);
+  for(const u of units){if(u===f)continue;if(u.box.x>=E.r-1&&overlapY(u.box,E))u.sx-=dx;if(u.box.y>=E.b-1&&overlapX(u.box,E))u.sy-=dy}}
+ const shown=u=>({x:u.box.x+u.sx,y:u.box.y+u.sy,r:u.box.r+u.sx,b:u.box.b+u.sy}),hit=(a,b)=>a.x<b.r+8&&a.r+8>b.x&&a.y<b.b+8&&a.b+8>b.y;
+ for(let pass=0;pass<12;pass++){let changed=false;for(const u of units){if(!u.sx&&!u.sy)continue;const me=shown(u);if(units.some(o=>o!==u&&hit(me,shown(o)))){u.sx=0;u.sy=0;changed=true}}if(!changed)break}
+ for(const u of units){if(!u.sx&&!u.sy)continue;for(const id of u.ids)foldShift.set(id,{x:u.sx,y:u.sy});if(u.g?.collapsed){const at=foldCardAt.get(u.g.id);if(at)foldCardAt.set(u.g.id,{x:at.x+u.sx,y:at.y+u.sy})}}}
+// Tidy: a card that looks inside a group's outline is in it. Cards (and
+// collapsed groups) sitting inside an outline they don't belong to move just
+// outside it, the shortest way. With onlyId, just around that group.
+function tidyGroups(onlyId){let moved=0;const flipFrom=snapshotPlaces();tidyGroups.measuring=true;render();
+ for(let pass=0;pass<12;pass++){let any=false;
+  for(const el of $$('#canvas .group')){const g=groupById(el.dataset.group);if(!g||onlyId&&g.id!==onlyId)continue;const mine=new Set(allCards(g)),t=tabRoom(),R={x:el.offsetLeft,y:el.offsetTop-t,r:el.offsetLeft+el.offsetWidth,b:el.offsetTop+el.offsetHeight};
+   for(const c of $$('#canvas [data-node],#canvas .group-card')){const ids=c.dataset.node?[c.dataset.node]:allCards(groupById(c.dataset.groupCard)||{members:[]});if(!ids.length||ids.every(id=>mine.has(id))||c.dataset.groupCard&&within(groupById(c.dataset.groupCard),g))continue;if(c.dataset.node&&mine.has(c.dataset.node))continue;
+    const top=c.dataset.groupCard?c.offsetTop-t:c.offsetTop,B={x:c.offsetLeft,y:top,r:c.offsetLeft+c.offsetWidth,b:c.offsetTop+c.offsetHeight};if(!(B.x<R.r&&B.r>R.x&&B.y<R.b&&B.b>R.y))continue;
+    const opts=[[R.x-B.r-14,0],[R.r-B.x+14,0],[0,R.y-B.b-14],[0,R.b-B.y+14]].sort((a,b)=>Math.abs(a[0]+a[1])-Math.abs(b[0]+b[1])),[mx,my]=opts[0];
+    for(const id of ids){const n=get(id);if(n){n.x+=mx;n.y+=my;delete n.auto}}any=true;moved++}
+   if(any)break}
+  if(!any)break;render()}
+ tidyGroups.measuring=false;persist();render();if(moved)playFlip(flipFrom);return moved}
 function renderGroups(){const canvas=$('#canvas');if(!canvas)return;canvas.querySelectorAll('.group,.group-card').forEach(e=>e.remove());cleanGroups();
  canvas.classList.toggle('focusing',!!focusGroup);renderCrumbs();if(tab!=='map'||walking)return;
  const visible=new Set(visibleNodes().map(n=>n.id)),first=canvas.firstChild,frag=document.createDocumentFragment();
  // Collapsed groups first: their cards are what other groups and connections
- // attach to. A collapsed group sits where its face card was.
+ // attach to. A collapsed group sits at the top-left corner of its cards.
  for(const g of groupList()){const ids=allCards(g);if(!g.collapsed||!ids.some(id=>collapsedOf(id)===g))continue;
-  const ps=ids.map(get).filter(active).map(pos);if(!ps.length)continue;const face=faceOf(g),at=face&&active(face)?pos(face):{x:Math.min(...ps.map(p=>p.x)),y:Math.min(...ps.map(p=>p.y))},x=at.x,y=at.y,inner=(g.groups||[]).length;
+  const ps=ids.map(get).filter(active).map(pos);if(!ps.length)continue;const face=faceOf(g),at=foldCardAt.get(g.id)||{x:Math.min(...ps.map(p=>p.x)),y:Math.min(...ps.map(p=>p.y))},x=at.x,y=at.y,inner=(g.groups||[]).length;
   const el=document.createElement('div');el.className='group-card';el.dataset.groupCard=g.id;el.style.cssText=`left:${x}px;top:${y}px;--g:${groupColor(g)}`;
   el.innerHTML=`${groupHead(g)}<p class="group-card-count">${face?esc(nodeLabel(face))+' · ':''}${ids.length} card${ids.length>1?'s':''}${inner?` · ${inner} group${inner>1?'s':''}`:''} inside</p>${face?`<p class="group-card-lead">${esc(wording(face)||face.quote||'')}</p>`:''}<button class="group-open" data-group-fold="${esc(g.id)}">▸ Open</button>`;
   canvas.append(el)}
@@ -167,8 +220,8 @@ function renderGroups(){const canvas=$('#canvas');if(!canvas)return;canvas.query
  // Each level of groups inside gets more room, so an outer outline and its tab clear the inner ones.
  const depth=new Map(),inside=(o,r)=>o!==r&&(within(o.g,r.g)||o.ids.length<r.ids.length&&o.ids.every(id=>r.ids.includes(id)));
  const level=r=>{if(depth.has(r))return depth.get(r);depth.set(r,0);const d=Math.max(-1,...rects.filter(o=>inside(o,r)).map(level))+1;depth.set(r,d);return d};
- for(const r of rects){const pad=16+34*level(r),el=document.createElement('div');el.className='group';el.dataset.group=r.g.id;
-  el.style.cssText=`left:${r.box.x-pad}px;top:${r.box.y-pad}px;width:${r.box.r-r.box.x+2*pad}px;height:${r.box.b-r.box.y+2*pad}px;--g:${groupColor(r.g)}`;el.innerHTML=groupHead(r.g);frag.append(el)}
+ for(const r of rects){const pad=groupPad(level(r)),el=document.createElement('div');el.className='group';el.dataset.group=r.g.id;
+  el.style.cssText=`left:${r.box.x-pad.side}px;top:${r.box.y-pad.top}px;width:${r.box.r-r.box.x+2*pad.side}px;height:${r.box.b-r.box.y+pad.top+pad.side}px;--g:${groupColor(r.g)}`;el.innerHTML=groupHead(r.g);frag.append(el)}
  canvas.insertBefore(frag,first);
  canvas.querySelectorAll('.group,.group-card').forEach(e=>e.classList.toggle('selected',groupSel.has(e.dataset.group||e.dataset.groupCard)));
  if(focusGroup){const f=groupById(focusGroup),ids=new Set(allCards(f));canvas.querySelectorAll('[data-node]').forEach(c=>c.classList.toggle('in-focus',ids.has(c.dataset.node)));canvas.querySelectorAll('.group,.group-card').forEach(e=>{const g=groupById(e.dataset.group||e.dataset.groupCard);e.classList.toggle('in-focus',!!g&&within(g,f))})}}
@@ -213,11 +266,11 @@ function renameGroup(id){const g=groupById(id),span=$(`#canvas [data-group-renam
  const input=document.createElement('input');input.className='group-input';input.value=g.label;input.placeholder='Its question, or a name';span.replaceWith(input);input.focus();input.select();
  let done=false;const finish=save=>{if(done)return;done=true;if(save&&input.value.trim()!==g.label){g.label=input.value.trim().slice(0,300);persist()}render()};
  input.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')finish(true);if(e.key==='Escape')finish(false)});input.addEventListener('blur',()=>finish(true));input.addEventListener('pointerdown',e=>e.stopPropagation(),true)}
-document.addEventListener('click',e=>{const t=e.target.closest('[data-group-fold],[data-group-color],[data-group-remove],[data-group-multi],[data-group-leave],[data-group-focus],[data-group-out],[data-group-face],[data-crumb],[data-group-pick],[data-group-cards],[data-group-rename-btn],[data-group-promote],#wrap-board');if(!t)return;const d=t.dataset;
+document.addEventListener('click',e=>{const t=e.target.closest('[data-group-fold],[data-group-color],[data-group-remove],[data-group-multi],[data-group-leave],[data-group-focus],[data-group-out],[data-group-face],[data-crumb],[data-group-pick],[data-group-cards],[data-group-rename-btn],[data-group-promote],#wrap-board,#tidy-groups');if(!t)return;const d=t.dataset;
  if(d.crumb!==undefined)return focusOn(d.crumb);if(d.groupFocus)return focusOn(d.groupFocus===focusGroup?(parentOf(groupById(d.groupFocus))?.id||''):d.groupFocus);
  if(readerMode&&!d.groupFold)return;
- if(t.id==='wrap-board')return wrapBoard();if(d.groupPromote)return promoteGroup(groupById(d.groupPromote));
- if(d.groupFold){const g=groupById(d.groupFold);if(g){g.collapsed=!g.collapsed;if(g.collapsed){const ids=allCards(g);if(ids.includes(selected)||[...multi].some(id=>ids.includes(id))){selected=null;multi.clear()}if(focusGroup&&groupById(focusGroup)&&within(groupById(focusGroup),g)&&focusGroup!==g.id)focusGroup=g.id}api.requestLayout?.();persist();render()}}
+ if(t.id==='wrap-board')return wrapBoard();if(t.id==='tidy-groups'){const n=tidyGroups();notify(n?`Moved ${n} card${n>1?'s':''} out of groups ${n>1?'they don’t':'it doesn’t'} belong to.`:'Groups are already tidy.',n?{label:'Undo',run:()=>undo()}:undefined);return}if(d.groupPromote)return promoteGroup(groupById(d.groupPromote));
+ if(d.groupFold){const g=groupById(d.groupFold);if(g){g.collapsed=!g.collapsed;animateNext=true;if(!g.collapsed)setTimeout(()=>tidyGroups(g.id),0);if(g.collapsed){const ids=allCards(g);if(ids.includes(selected)||[...multi].some(id=>ids.includes(id))){selected=null;multi.clear()}if(focusGroup&&groupById(focusGroup)&&within(groupById(focusGroup),g)&&focusGroup!==g.id)focusGroup=g.id}api.requestLayout?.();persist();render()}}
  else if(d.groupColor){const g=groupById(d.groupColor);if(g){g.color=(g.color+1)%GROUP_COLORS.length;persist();render()}}
  else if(d.groupRemove){const g=groupById(d.groupRemove),p=g&&parentOf(g);if(!g)return;for(const k of g.groups||[]){const kid=groupById(k);if(kid)reparent(kid,p)}if(p){p.groups=p.groups.filter(id=>id!==g.id);p.members=[...new Set([...p.members,...g.members])]}board.groups=groupList().filter(x=>x!==g);if(focusGroup===g.id)focusGroup=p?.id||null;persist();render();notify('Ungrouped. The cards stay where they are.',{label:'Undo',run:()=>undo()})}
  else if(d.groupOut){const g=groupById(d.groupOut),p=g&&parentOf(g);if(g&&p){reparent(g,parentOf(p));persist();render();notify(`Took “${g.label||'Untitled group'}” out of “${p.label||'Untitled group'}”.`,{label:'Undo',run:()=>undo()})}}
@@ -228,7 +281,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-group-fold
  else if(d.groupRenameBtn)renameGroup(d.groupRenameBtn);
  else if(d.groupLeave){const[gid,id]=d.groupLeave.split('|'),g=groupById(gid);if(g){g.members=g.members.filter(m=>m!==id);persist();render()}}});
 document.addEventListener('change',e=>{const s=e.target.closest('[data-group-add]');if(!s||!s.value)return;const g=groupById(s.value),ids=multi.size?[...multi]:[selected];if(g){g.members=[...new Set([...g.members,...ids])];persist();render();notify(`Added to “${g.label||'Untitled group'}”.`)}});
-document.addEventListener('dblclick',e=>{const t=e.target.closest('[data-group-rename]');if(t&&author&&!readerMode){e.preventDefault();renameGroup(t.dataset.groupRename);return}const c=e.target.closest('.group-card');if(c&&!e.target.closest('button,input')){const g=groupById(c.dataset.groupCard);if(g){g.collapsed=false;api.requestLayout?.();persist();render()}}});
+document.addEventListener('dblclick',e=>{const t=e.target.closest('[data-group-rename]');if(t&&author&&!readerMode){e.preventDefault();renameGroup(t.dataset.groupRename);return}const c=e.target.closest('.group-card');if(c&&!e.target.closest('button,input')){const g=groupById(c.dataset.groupCard);if(g){g.collapsed=false;animateNext=true;api.requestLayout?.();persist();render();setTimeout(()=>tidyGroups(g.id),0)}}});
 // Drag a group by its label (or a collapsed group by its card) to move
 // everything in it; drop it on another group to put it inside. A click
 // selects its cards (Shift-click adds them to the selection).
@@ -612,7 +665,7 @@ if(document.modelContext?.registerTool){const life=new AbortController();for(con
 // behave exactly as they do for manual edits.
 const api={get board(){return board},get session(){return session},workspace,get,uid,esc,notify,render,persist,freePosition,select,validateBoard,
  async flush(){await saveQueue;if(saveBlocked)throw new Error('Save your board file and reload before switching boards.');},
- setAuthor(v){author=!!v;render()},get inboxOpen(){return inboxOpen},setInbox(v){inboxOpen=!!v;render()},get zoom(){return zoom},canvasPoint(cx,cy){const r=$('#canvas').getBoundingClientRect();return {x:Math.round((cx-r.left)/zoom),y:Math.round((cy-r.top)/zoom)}},get tab(){return tab},scope(){const g=focusGroup&&groupById(focusGroup);if(!g)return null;const base=board.title==='What am I trying to establish?'?'the whole board':board.title;return {ids:new Set(allCards(g)),label:g.label,outer:parentOf(g)?.label||base,setLabel(v){g.label=v.slice(0,300);persist();render()},exit(){focusOn(parentOf(g)?.id||'')}}},isHidden:id=>{const n=get(id);return !!n&&evidenceHidden(n)},showEvidenceFor,wordLabel,allowedWords,fitWord,linkRole,supportersOf,WORD_CHOICES,mainConclusion,isInterim,setTab(t){tab=t;render()},openCard,onRender(f){renderHooks.push(f)},commit(record=true){commitBoard(record)},typeLabel,startWalk(){walking=true;step=0;tab='map';render()},currentStep:()=>walking?sequence()[step]?.id:null,sequence:()=>sequence().map(n=>n.id)};
+ setAuthor(v){author=!!v;render()},get inboxOpen(){return inboxOpen},setInbox(v){inboxOpen=!!v;render()},get zoom(){return zoom},canvasPoint(cx,cy){const r=$('#canvas').getBoundingClientRect();return {x:Math.round((cx-r.left)/zoom),y:Math.round((cy-r.top)/zoom)}},get tab(){return tab},cardSize:id=>sizeCache.get(id)||null,scope(){const g=focusGroup&&groupById(focusGroup);if(!g)return null;const base=board.title==='What am I trying to establish?'?'the whole board':board.title;return {ids:new Set(allCards(g)),label:g.label,outer:parentOf(g)?.label||base,setLabel(v){g.label=v.slice(0,300);persist();render()},exit(){focusOn(parentOf(g)?.id||'')}}},isHidden:id=>{const n=get(id);return !!n&&evidenceHidden(n)},showEvidenceFor,wordLabel,allowedWords,fitWord,linkRole,supportersOf,WORD_CHOICES,mainConclusion,isInterim,setTab(t){tab=t;render()},openCard,onRender(f){renderHooks.push(f)},commit(record=true){commitBoard(record)},typeLabel,startWalk(){walking=true;step=0;tab='map';render()},currentStep:()=>walking?sequence()[step]?.id:null,sequence:()=>sequence().map(n=>n.id)};
 if(!readerMode){import('./guide.js').then(m=>m.init(api)).catch(e=>console.warn('Guide unavailable',e));import('./inbox-panel.js').then(m=>m.init(api)).catch(e=>console.warn('Inbox panel unavailable',e));import('./outline-editor.js').then(m=>m.init(api)).catch(e=>console.warn('Outline unavailable',e));import('./assist.js').then(m=>m.init(api)).catch(e=>console.warn('Local AI drafting unavailable',e));}
 // One row for navigation, one for the board's tools: the board gets the height.
 function compactChrome(){const top=$('.topline'),nav=$('.workspace-nav'),bar=$('.board-bar'),acts=$('.top-actions');if(!top||!nav||!bar||!acts)return;document.body.classList.add('compact-chrome');
@@ -620,6 +673,7 @@ function compactChrome(){const top=$('.topline'),nav=$('.workspace-nav'),bar=$('
  acts.insertAdjacentHTML('afterbegin','<div class="board-menu"><button id="board-menu-toggle" aria-haspopup="menu" aria-expanded="false">Board ▾</button><div class="board-menu-list" role="menu" hidden></div></div>');
  const list=acts.querySelector('.board-menu-list'),toggle=$('#board-menu-toggle'),open=v=>{list.hidden=!v;toggle.setAttribute('aria-expanded',String(v))};
  for(const b of [...acts.querySelectorAll(':scope > button')]){b.setAttribute('role','menuitem');list.append(b)}
+ list.insertAdjacentHTML('afterbegin','<button id="tidy-groups" role="menuitem" title="Move cards that sit inside a group’s outline without belonging to it just outside it">▭ Tidy groups</button>');
  list.insertAdjacentHTML('afterbegin','<button id="wrap-board" role="menuitem" title="Put everything so far in one group, inside a new, bigger question">⤴ Wrap in a bigger question</button>');
  if($('#edit-title')){$('#edit-title').setAttribute('role','menuitem');$('#edit-title').textContent='✎ Edit base question';list.prepend($('#edit-title'))}
  toggle.onclick=()=>open(list.hidden);list.addEventListener('click',()=>open(false));document.addEventListener('mousedown',e=>{if(!e.target.closest('.board-menu'))open(false)});document.addEventListener('keydown',e=>{if(e.key==='Escape')open(false)});
