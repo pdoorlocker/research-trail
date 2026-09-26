@@ -36,19 +36,19 @@ The extension works without Ollama — you still get the graph, timeline, notes,
    launchctl setenv OLLAMA_ORIGINS "chrome-extension://*"
    ```
    then quit and restart the Ollama app. (If you run `ollama serve` manually instead: `OLLAMA_ORIGINS="chrome-extension://*" ollama serve`.)
-3. Check the dot in the extension popup — green means connected. Models and the similarity threshold are configurable in the journey page settings (⚙).
+3. Check the bottom of the extension popup — it says *Ollama ready* when connected. Models and the similarity threshold are configurable in the journey page settings (⚙).
 
 If Ollama is offline, AI jobs queue up and run automatically when it comes back.
 
 ## How to use it
 
 1. **Just browse.** Capture is always on (pause anytime from the popup or panel — the badge shows `❚❚` while paused). Every page is captured with its readable text, and the extension records *how* you got there: clicked link, opened-in-new-tab branch, or fresh entry point.
-2. **Open the side panel** (📍 in the popup, or Alt+R) — the live "you are here" view. Your current page is ringed in green, pages with open tabs are lit, everything else is parked (dimmed). Click a node to switch to its tab or reopen it; **⏏ Park other tabs** closes everything except where you are, safely.
-3. **Workspaces**: the popup switches between them or creates new ones — each is its own map ("apartment hunt", "Scratch", …).
-4. **Star pages that matter**: press **Alt+S**, use *☆ Star this page* in the popup, or right-click → *Star / unstar this page*. A small confirmation (with Undo) shows on the page and the toolbar icon shows ★ while you're on it. Starred pages get a gold ring on the trail map, a *★ Starred* list in the trail's top bar, a star in the page drawer and timeline, and come first in the evidence inbox's *From your trail* tab. Starring a page that isn't on the trail yet adds it.
+2. **Open the side panel** (*Side panel* in the popup, or Alt+R) — the live "you are here" view. Your current page is ringed in green, pages with open tabs are lit, everything else is parked (dimmed). Click a node to switch to its tab or reopen it; **⏏ Park other tabs** closes everything except where you are, safely.
+3. **Workspaces**: the top of the popup shows the workspace you're recording into; click it to switch or create one — each is its own map ("apartment hunt", "Scratch", …). The pause button sits right beside it.
+4. **Star pages that matter**: press **Alt+S**, use *☆ Star* in the popup, or right-click → *Star / unstar this page*. A small confirmation (with Undo) shows on the page and the toolbar icon shows ★ while you're on it. Starred pages get a gold ring on the trail map, a *★ Starred* list in the trail's top bar, a star in the page drawer and timeline, and come first in the evidence inbox's *From your trail* tab. Starring a page that isn't on the trail yet adds it.
 5. **Tab groups decide**: a tab inside a workspace's tab group records into that workspace, and switching to it makes that workspace current, whatever the popup showed before. Pages opened from it stay in its group, and trails never connect pages across workspaces.
 4. **Save passages**: select text on any page → right-click → *Save passage as evidence*. It shows on the page in your trail and lands in your evidence inbox, without leaving the page.
-5. **Open the full map** (🗺 in the popup) for the deep view — notes, timeline, AI synthesis, exports:
+5. **Open the full map** (*Trail* in the popup) for the deep view — notes, timeline, AI synthesis, exports:
    - Nodes are pages, sized by reading time and revisits; pages on the same domain cluster into dashed boxes.
    - Solid gray arrows = clicked links; blue = opened in a new tab; purple dashed = AI-found similarity (with a label explaining the connection); orange = connections you drew yourself.
    - Click a node for the drawer: summary bullets, tags, your notes, highlights, and all its connections.
@@ -66,7 +66,7 @@ The reason this tool exists: reading Austrian government sites in bureaucratic G
 - **Translate** — swaps German↔English in place, preserving the page's markup, using Chrome's on-device Translator API (or Ollama). Translations are cached per paragraph by text hash, so they survive revisits.
 - **Explain** — plain-language explanation of what a clause actually means for you, using Ollama (or, opt-in, Gemini — see Privacy). Because it lives inside Research Trail, "explain this" knows your current workspace's goal and the pages you've already read on this trail.
 - **Glossary & ask-the-page** — collect recurring bureaucratic terms, or chat with the current page from the side panel.
-- **Hide translations** — saved translations re-apply automatically on revisit, which can trip up script-heavy pages. *Hide translations* (popup or side panel) puts the page back to German and stops re-applying them there, while keeping the hover toolbar; the cache is kept, so *Show translations* is instant. If the page's own scripts are still confused, *Reload page* gives them a clean start — the setting sticks. *Amtshelfer: off* switches the whole module off for the page instead.
+- **Hide translations** — saved translations re-apply automatically on revisit, which can trip up script-heavy pages. *Show German* in the popup (or *Hide translations* in the side panel) puts the page back to German and stops re-applying them there, while keeping the hover toolbar; the cache is kept, so *Show translations* is instant. If the page's own scripts are still confused, *Reload page* gives them a clean start — the setting sticks. *Amtshelfer: off* switches the whole module off for the page instead.
 
 It's wired into the trail rather than standalone on purpose: the workspace name *is* the goal, and the journey *is* the context.
 

@@ -6,42 +6,59 @@
   <link rel="stylesheet" href="../shared/theme.css">
 </head>
 <body>
-  <header>
-    <span class="logo">The Things We Learned</span>
-    <span id="ollama-dot" class="dot" title="Checking Ollama…"></span>
-  </header>
+  <!-- Where pages are going: the workspace you're recording into, with its
+       switcher and the pause control right beside it. -->
+  <div class="ws">
+    <button id="ws-toggle" class="ws-toggle" aria-haspopup="listbox" aria-expanded="false">
+      <span id="rec-dot" class="rec-dot" aria-hidden="true"></span>
+      <span class="ws-text">
+        <span id="rec-label" class="ws-label">Recording into</span>
+        <span id="ws-name" class="ws-name">…</span>
+      </span>
+      <span class="chev" aria-hidden="true">▾</span>
+    </button>
+    <button id="pause-btn" class="icon-btn" aria-label="Pause recording" title="Pause recording"></button>
+  </div>
+  <div id="ws-meta" class="meta"></div>
 
-  <section>
-    <div class="journey-card">
-      <div class="journey-title" id="active-name"></div>
-      <div class="journey-meta" id="active-meta"></div>
-    </div>
-    <button id="star-btn" class="star-btn" hidden title="Star the page you’re on so it’s easy to find again (Alt+S)">☆ Star this page</button>
-    <div class="row">
-      <button id="pause-btn"></button>
-      <button id="panel-btn">Side panel</button>
-    </div>
-    <button id="resume-btn" class="resume" hidden><span class="resume-label">Resume</span><span id="resume-title"></span><span id="resume-where"></span></button>
-    <div class="row"><button id="open-map-btn">Browsing trail</button><button id="open-evidence-btn" class="primary">Evidence board</button></div>
-
-    <div class="row" id="ah-quick">
-      <button id="ah-translate-btn" title="Amtshelfer: translate every paragraph on this page, each with a DE/EN toggle">Translate page</button>
-      <button id="ah-toggle-btn" hidden></button>
-    </div>
-    <div class="row" id="ah-hide-row" hidden>
-      <button id="ah-hide-btn"></button>
-      <button id="ah-reload-btn" hidden title="Reload so the page's own scripts start fresh — translations stay hidden">Reload page</button>
-    </div>
-
+  <div id="ws-menu" class="ws-menu" role="listbox" hidden>
     <div id="ws-list"></div>
+    <form id="ws-new" class="ws-new">
+      <button type="button" id="ws-new-btn" class="ws-new-btn">＋ New workspace</button>
+      <input id="ws-new-name" type="text" placeholder="Name it, then press Enter" maxlength="80" hidden>
+    </form>
+  </div>
 
-    <div class="row">
-      <input id="ws-name" type="text" placeholder="New workspace…" maxlength="80">
-      <button id="ws-create">Add</button>
+  <!-- What you can do with the page you're on. -->
+  <section id="page" class="page" hidden>
+    <div id="page-host" class="label"></div>
+    <div class="page-row">
+      <button id="star-btn" class="star-btn" title="Star this page so it’s easy to find again (Alt+S)">☆ Star</button>
+      <button id="translate-btn" class="translate-btn" hidden></button>
+      <div class="more-wrap">
+        <button id="more-btn" class="icon-btn" aria-label="More for this page" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
+        <div id="more-menu" class="more-menu" role="menu" hidden></div>
+      </div>
     </div>
   </section>
 
-  <footer id="ollama-hint" hidden></footer>
+  <!-- Where to go next. -->
+  <button id="resume-btn" class="resume" hidden>
+    <span class="resume-label">Resume</span>
+    <span id="resume-title"></span>
+    <span id="resume-where"></span>
+  </button>
+  <div class="go">
+    <button id="open-map-btn">Trail</button>
+    <button id="open-evidence-btn">Board</button>
+    <button id="panel-btn">Side panel</button>
+  </div>
+
+  <footer>
+    <span id="ai-status" class="ai-status">Checking Ollama…</span>
+    <span class="keys">Alt+S star</span>
+  </footer>
+  <div id="ollama-hint" class="hint" hidden></div>
 
   <script type="module" src="popup.js"></script>
 </body>
