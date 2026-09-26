@@ -37,9 +37,11 @@ $('evidence-btn').onclick=()=>openBoard();$('outline-present').onclick=()=>openB
 for(const [id,screenshot] of [['outline-capture',false],['outline-screenshot',true]])$(id).onclick=async()=>{
   $(id).disabled=true;$('outline-status').textContent=screenshot?'Drag a box on the page (Esc cancels)…':'Saving…';
   try{const response=await chrome.runtime.sendMessage({type:'capture-evidence-from-panel',journeyId,screenshot});
+    if(response.cancelled){$('outline-status').textContent='';return}
     if(response.error)throw new Error(response.error==='Select a passage on the page first.'?'Highlight some text on the page first, then click Save selection.':response.error);
-    $('outline-status').textContent=screenshot?'Screenshot saved to the evidence inbox.':'Passage saved to the evidence inbox.';
-    showAttach(response.id);
+    // The confirmation (with Attach… and Open board) shows on the page itself,
+    // exactly like right-click → Save passage.
+    $('outline-status').textContent=(screenshot?'Screenshot saved':'Passage saved')+(response.shown?'. Attach it from the confirmation on the page.':' to the evidence inbox.');
   }catch(error){$('outline-status').textContent=error.message;}finally{$(id).disabled=false;}
 };
 document.addEventListener('workspace-changed',refresh);
@@ -59,19 +61,3 @@ $('jot-form').onsubmit=async e=>{
     chrome.runtime.sendMessage({type:'jot-saved',journeyId}).catch(()=>{});
   }catch(error){$('outline-status').textContent=error.message;}
 };
-
-// After capturing from the panel: attach the passage under a line of the
-// board shown above, without opening the board.
-async function showAttach(captureId){
-  const box=$('outline-attach');box.hidden=false;
-  box.innerHTML='<button id="attach-open">Attach to a line…</button>';
-  $('attach-open').onclick=async()=>{
-    const res=await chrome.runtime.sendMessage({type:'capture-attach-options',journeyId,boardId:$('outline-board').value});
-    if(!res?.lines?.length){box.innerHTML='<p class="hint">This board has no lines yet.</p>';return}
-    let word='because';
-    box.innerHTML=`<div class="attach-seg"><button data-w="because" aria-pressed="true">backs it up</button><button data-w="objection" aria-pressed="false">objects to it</button></div><input id="attach-find" placeholder="Find a line" aria-label="Find a line"><ul id="attach-lines"></ul>`;
-    const draw=()=>{const q=$('attach-find').value.toLowerCase();$('attach-lines').replaceChildren(...res.lines.filter(l=>!q||l.text.toLowerCase().includes(q)).slice(0,30).map(l=>{const li=document.createElement('li'),b=document.createElement('button');b.textContent=l.text;b.onclick=async()=>{const r=await chrome.runtime.sendMessage({type:'capture-attach',captureId,boardId:res.boardId,lineId:l.id,word});box.hidden=true;$('outline-status').textContent=r?.error||`Attached under “${l.text.slice(0,60)}”.`};li.append(b);return li}))};
-    box.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{word=b.dataset.w;box.querySelectorAll('[data-w]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))});
-    $('attach-find').oninput=draw;draw();$('attach-find').focus();
-  };
-}

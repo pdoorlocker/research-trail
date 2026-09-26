@@ -951,25 +951,36 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!['save-passage', 'capture-evidence'].includes(info.menuItemId)) return;
   const screenshot = info.menuItemId === 'capture-evidence';
   const target = await captureTarget();
-  let toast;
+  const result = await captureWithToast(tab, info, screenshot, target);
+  if (!result.shown && !result.cancelled) {
+    // Pages we can't draw on (browser pages, PDFs): show the result on the board.
+    await openBoard({ j: target.journeyId }, result.error ? { inbox: '1', captureError: result.error } : { inbox: '1' });
+  }
+});
+
+// Save a passage (or screenshot) and confirm it on the page itself, with
+// Attach… / Open board / Move to…: one flow whether it started from the
+// right-click menu or the side panel's buttons.
+async function captureWithToast(tab, info, screenshot, target) {
+  let toast, capture = null;
   try {
-    const capture = await captureEvidence(tab, info, target.journeyId, screenshot);
+    capture = await captureEvidence(tab, info, target.journeyId, screenshot);
     await recordOnTrail(capture);
     notifyTrailUpdated(target.journeyId);
     toast = { journeyId: target.journeyId, journeyName: target.journeyName, captureId: capture.id, quote: capture.quote, screenshot,
       warning: capture.translation ? 'Saved the original German paragraph; your English selection is kept as its translation.' : capture.view === 'translated' ? 'Saved from the translated view: switch to the original wording to link to the exact passage.' : capture.view === 'legacy-unverified' ? 'The exact wording couldn’t be checked on this page.' : '',
       moveTo: target.alternative };
   } catch (error) {
-    if (error.cancelled) return;
+    if (error.cancelled) return { cancelled: true };
     toast = { journeyId: target.journeyId, error: error.message };
   }
   try {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: showCaptureToast, args: [toast] });
+    return { id: capture?.id, error: toast.error, shown: true };
   } catch {
-    // Pages we can't draw on (browser pages, PDFs): show the result on the board.
-    await openBoard({ j: target.journeyId }, toast.error ? { inbox: '1', captureError: toast.error } : { inbox: '1' });
+    return { id: capture?.id, error: toast.error, shown: false };
   }
-});
+}
 
 // Attach a captured passage under a line of a board. If the board is open,
 // its tab applies the change (undo works, no save conflict); otherwise the
@@ -1075,11 +1086,12 @@ async function handleMessage(msg, sender) {
     case 'capture-evidence-from-panel': {
       const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
       const journeyId = msg.journeyId || await ensureActiveWorkspace();
-      const capture = await captureEvidence(tab, {}, journeyId, !!msg.screenshot);
-      // Same as right-click → Save passage: the passage shows on the trail too.
-      await recordOnTrail(capture);
-      notifyTrailUpdated(journeyId);
-      return {id:capture.id};
+      // Same flow as right-click → Save passage, confirmation on the page included.
+      const journey = await db.get('journeys', journeyId);
+      const result = await captureWithToast(tab, {}, !!msg.screenshot, { journeyId, journeyName: journey?.name || 'this workspace' });
+      if (result.cancelled) return { cancelled: true };
+      if (result.error) return { error: result.error, shown: result.shown };
+      return { id: result.id, shown: result.shown };
     }
 
     case 'page-captured':

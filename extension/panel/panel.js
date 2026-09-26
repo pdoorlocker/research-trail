@@ -210,6 +210,7 @@ function wireChrome() {
   $('glossary-btn').onclick = () => openSheet('Glossary', (body) => amtshelfer?.renderGlossary(body));
   $('ah-settings-btn').onclick = () => openSheet('Translation settings', (body) => amtshelfer?.renderSettings(body));
   $('sheet-close').onclick = closeSheet;
+  $('close-btn').onclick = () => window.close();
 
   // Dock tabs: this page / board. Remembered.
   const setDock = (which) => {
