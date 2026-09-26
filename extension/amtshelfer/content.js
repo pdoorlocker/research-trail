@@ -1030,24 +1030,25 @@
       <style>
         .bar {
           display: flex; flex-direction: column; gap: 2px; padding: 3px;
-          background: #1f2933; border-radius: 8px;
-          box-shadow: 0 2px 10px rgba(0,0,0,.35);
+          background: #20231f; border-radius: 9px;
+          border: 1px solid rgba(255,255,255,.14);
+          box-shadow: 0 6px 20px rgba(0,0,0,.3);
           font: 12px/1 -apple-system, system-ui, sans-serif;
         }
         button {
-          all: unset; cursor: pointer; color: #e4e7eb;
+          all: unset; cursor: pointer; color: #f5f2ea;
           padding: 5px 9px; border-radius: 5px; white-space: nowrap;
           text-align: left;
         }
-        button:hover { background: #3e4c59; }
+        button:hover { background: rgba(255,255,255,.1); }
         button.hidden { display: none; }
-        button.on { color: #7ce0a3; }
+        button.on { color: #a0cfac; }
         button.ctx {
-          font-size: 10.5px; color: #9aa5b1;
-          border-top: 1px solid #3e4c59; border-radius: 0 0 5px 5px;
+          font-size: 10.5px; color: rgba(245,242,234,.55);
+          border-top: 1px solid rgba(255,255,255,.12); border-radius: 0 0 5px 5px;
           margin-top: 1px; padding-top: 6px;
         }
-        button.ctx.on { color: #7ce0a3; }
+        button.ctx.on { color: #a0cfac; }
       </style>
       <div class="bar">
         <button data-act="translate">Translate</button>
@@ -1055,7 +1056,7 @@
         <button data-act="explain">Explain</button>
         <button data-act="read">✓ Read</button>
         <button data-act="glossary" class="hidden">＋ Glossary</button>
-        <button data-act="ctx" class="ctx" title="Include the whole page as context for Explain (and Ollama translation) — toggles per request">page ctx ✓</button>
+        <button data-act="ctx" class="ctx" title="Include the whole page as context for Explain (and Ollama translation) — toggles per request">Whole page as context ✓</button>
       </div>`;
     toolbarEl = toolbarShadow.querySelector('.bar');
     toolbarEl.addEventListener('mouseenter', () => clearTimeout(hideTimer));
@@ -1151,7 +1152,7 @@
     const sel = norm(String(getSelection() || ''));
     const inBlock = sel && el.contains(getSelection()?.anchorNode || null);
     btn('glossary').classList.toggle('hidden', !inBlock || sel.length > 60);
-    btn('ctx').textContent = ctxOn() ? 'page ctx ✓' : 'page ctx ✗';
+    btn('ctx').textContent = ctxOn() ? 'Whole page as context ✓' : 'Whole page as context: off';
     btn('ctx').classList.toggle('on', ctxOn());
   }
 
@@ -1288,11 +1289,14 @@
     if (!found) return;
     const banner = document.createElement('div');
     banner.id = 'ah-banner';
+    const tag = document.createElement('span');
+    tag.className = 'ah-banner-tag';
+    tag.textContent = 'EN';
     const link = document.createElement('a');
     link.href = found.url;
     link.textContent = found.pageSpecific
-      ? 'This page has an official English version →'
-      : 'This site has an official English version →';
+      ? 'Official English version of this page →'
+      : 'This site has an English version →';
     const close = document.createElement('button');
     close.type = 'button';
     close.textContent = '×';
@@ -1301,8 +1305,14 @@
       sessionStorage.setItem('ah-banner-dismissed', '1');
       banner.remove();
     });
-    banner.append(link, close);
+    banner.append(tag, link, close);
     document.body.appendChild(banner);
+    // A notice, not a fixture: it steps aside after a while unless you're
+    // pointing at it (the popup and the page's own switcher still have it).
+    let fade = setTimeout(() => leave(), 12000);
+    const leave = () => { banner.classList.add('ah-banner-out'); setTimeout(() => banner.remove(), 400); };
+    banner.addEventListener('mouseenter', () => clearTimeout(fade));
+    banner.addEventListener('mouseleave', () => { fade = setTimeout(leave, 4000); });
   }
 
   // Streaming request over a dedicated port: the background posts {delta,
