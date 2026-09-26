@@ -1978,7 +1978,7 @@ async function askQuestion(question) {
     let frame = 0;
     const res = await chatStream(messages, {
       temperature: 0.2,
-      numCtx: 16384, // the trail + the question needs real room; see chatStream
+      // the trail + the question needs real room; chatStream's shared window (16k) covers it
       signal: abort.signal,
       onDelta: (_piece, full) => {
         turn.a = full;

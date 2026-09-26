@@ -210,11 +210,35 @@
     });
   }
 
+  // The page's German text, taken once per address and reused. Ollama caches
+  // a prompt's opening, so an identical context in front of every paragraph
+  // costs ~0.5 s after the first call instead of ~1.7 s each time; re-reading
+  // the live page broke that, since it changes (turns partly English) as
+  // paragraphs get translated. Built from the registered blocks' German, so
+  // it's the original even where English is showing, and from the main
+  // content when the page marks one, not the menus and cookie banners.
+  let contextSnapshot = null;
+  function germanPageText() {
+    if (contextSnapshot?.url === location.href) return contextSnapshot.text;
+    const scope = document.querySelector('main, [role="main"], article') || document.body;
+    const parts = [];
+    let total = 0;
+    for (const el of scope.querySelectorAll('[data-ah-hash]')) {
+      if (el.parentElement?.closest('[data-ah-hash]') || !isVisible(el)) continue;
+      const t = norm(germanText(el));
+      if (!t) continue;
+      parts.push(t);
+      total += t.length + 1;
+      if (total > 6000) break;
+    }
+    const text = (parts.join('\n') || norm(scope.innerText || '')).slice(0, 6000);
+    contextSnapshot = { url: location.href, text };
+    return text;
+  }
+
   function pageContext(includeText) {
     const context = { title: document.title, url: location.href };
-    if (includeText) {
-      context.pageText = norm(document.body?.innerText || '').slice(0, 6000);
-    }
+    if (includeText) context.pageText = germanPageText();
     return context;
   }
 
@@ -1871,18 +1895,50 @@
 
     // Register blocks added later (accordions, lazy content) — and if a
     // whole-page translate already ran, catch late arrivals up to English.
+    // Only what was actually ADDED is scanned, never the whole page again:
+    // busy pages (carousels, ad slots, live clocks) change constantly, and
+    // re-walking every block on each change kept the CPU busy for as long
+    // as the tab stayed open. Our own edits (translations swapped into a
+    // block, chips, panels, toasts) are ignored, and nothing runs while the
+    // tab is in the background — it catches up when you come back.
     let debounce;
-    observer = new MutationObserver(() => {
-      clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        scanBlocks();
-        if (followPageTranslate && !pageTranslating &&
-            untranslatedVisibleIn(document).blocks.length) {
-          translateWholePage();
+    const pending = new Set();
+    const ours = node => node.nodeType !== 1
+      ? !!node.parentElement?.closest('[data-ah-hash], ' + OWN_UI_SELECTOR)
+      : !!node.closest('[data-ah-hash], ' + OWN_UI_SELECTOR) || node.matches('.ah-chip, .ah-gist');
+    const flush = () => {
+      if (document.hidden) return; // visibilitychange calls back in
+      const roots = [...pending].filter(n => n.isConnected);
+      pending.clear();
+      const fresh = [];
+      for (const root of roots) {
+        if (root.dataset?.ahHash) continue;
+        const before = new Set(root.querySelectorAll('[data-ah-hash]'));
+        scanBlocks(root);
+        // scanBlocks looks inside a root; the root itself may be a block too.
+        if (root.matches(BLOCK_SELECTOR)) registerBlock(root);
+        else if (root.matches(INLINE_SELECTOR)) registerInline(root);
+        if (root.dataset.ahHash) fresh.push(root);
+        for (const el of root.querySelectorAll('[data-ah-hash]')) if (!before.has(el)) fresh.push(el);
+      }
+      if (followPageTranslate && !pageTranslating &&
+          fresh.some(el => !el.classList.contains('ah-translated') && isVisible(el))) {
+        translateWholePage();
+      }
+    };
+    observer = new MutationObserver(records => {
+      for (const r of records) {
+        for (const node of r.addedNodes) {
+          if (node.nodeType !== 1 || ours(node)) continue;
+          pending.add(node);
         }
-      }, 800);
+      }
+      if (!pending.size) return;
+      clearTimeout(debounce);
+      debounce = setTimeout(flush, 800);
     });
     observer.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && pending.size) flush(); });
   }
 
   // Puts the page back the way we found it: German text restored, chips,

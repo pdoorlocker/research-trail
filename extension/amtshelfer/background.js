@@ -342,7 +342,9 @@ async function ollamaMessages(messages, s, temperature, format, onDelta, signal)
   const body = {
     model: chat,
     stream: true,
-    options: { temperature },
+    // Same window as the rest of the extension (lib/ollama.js NUM_CTX): a
+    // different size makes Ollama reload the model between features.
+    options: { temperature, num_ctx: 16384 },
     messages,
   };
   if (format) body.format = format;

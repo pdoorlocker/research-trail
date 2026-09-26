@@ -48,6 +48,13 @@ export async function resolveModels() {
   return { chat, embed };
 }
 
+// One context window for every chat call in the extension (the Amtshelfer
+// module mirrors it). Ollama reloads the model whenever a request asks for a
+// different size, so mixing sizes cost a 2–3 s reload each time you switched
+// between features; and older Ollama builds default to 2–4k and silently cut
+// long prompts. 16k covers the largest prompt we send (Ask, the page agent).
+export const NUM_CTX = 16384;
+
 export async function generate(prompt, { system = '', timeoutMs = 120000, numPredict } = {}) {
   const { ollamaUrl } = await getSettings();
   const { chat } = await resolveModels();
@@ -59,7 +66,7 @@ export async function generate(prompt, { system = '', timeoutMs = 120000, numPre
   // Ollama's default output cap is small (often ~128 tokens) — batch jobs
   // that return one entry per page need much more room or the response
   // truncates mid-JSON with no visible error.
-  if (numPredict) body.options = { num_predict: numPredict };
+  body.options = { num_ctx: NUM_CTX, ...(numPredict ? { num_predict: numPredict } : {}) };
 
   const attempt = () => fetch(`${ollamaUrl}/api/generate`, {
     method: 'POST',
@@ -107,7 +114,7 @@ export async function chatStream(messages, { temperature = 0.3, numCtx, onDelta,
   // Ollama's default context window is small on many setups, and it truncates
   // silently from the front — which would quietly eat the material the answer
   // is supposed to be grounded in. Callers that send a big prompt say so.
-  if (numCtx) options.num_ctx = numCtx;
+  options.num_ctx = numCtx || NUM_CTX;
   const body = { model: chat, messages, stream: true, options };
 
   const attempt = (payload) => fetch(url, {
@@ -170,7 +177,7 @@ export async function chatStream(messages, { temperature = 0.3, numCtx, onDelta,
 
 // One non-streaming chat turn with tool definitions (Ollama's native tool
 // calling). Returns the assistant message, whose tool_calls the caller runs.
-export async function chatTools(messages, tools, { temperature = 0.2, numCtx = 8192, signal } = {}) {
+export async function chatTools(messages, tools, { temperature = 0.2, numCtx = NUM_CTX, signal } = {}) {
   const { ollamaUrl } = await getSettings();
   const { chat } = await resolveModels();
   let res;
