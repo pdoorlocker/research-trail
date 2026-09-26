@@ -388,3 +388,6 @@ main.panel-idle>#inspector,main.panel-idle>#side-splitter{display:none}
 .compact-chrome .board-bar #add-toggle span{display:inline!important}
 @container (max-width:1050px){.compact-chrome .board-bar .tabs{gap:12px}.compact-chrome .board-bar #authorbar{gap:4px}.compact-chrome .board-bar #authorbar button,.compact-chrome .board-bar-right button{padding:4px 7px}.compact-chrome .board-bar-right{gap:6px}}
 @container (max-width:1050px){.compact-chrome .board-bar{padding-left:14px;padding-right:12px}}
+.tabs #map-tab .l{background:none;font:inherit;padding:0;margin:0;border-radius:0;color:inherit}
+.ol-scope{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:8px 12px;border:1px solid var(--rule);border-left:3px solid var(--green);border-radius:6px;font-size:13px;color:var(--muted)}
+.ol-scope button{font-size:12px;padding:3px 10px}

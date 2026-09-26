@@ -329,7 +329,14 @@ export function init(api) {
   // ---------- Rendering ----------
 
   function renderOutline() {
-    const t = tree(), b = api.board, rows = displayRows(t);
+    const t = tree(), b = api.board, scope = api.scope?.();
+    let rows = displayRows(t);
+    // Inside a group (focused on the board), the outline shows just that level.
+    if (scope) {
+      rows = rows.filter(r => scope.ids.has(r.n.id));
+      const min = Math.min(...rows.map(r => r.indent));
+      if (Number.isFinite(min)) rows = rows.map(r => ({ ...r, indent: r.indent - min }));
+    }
     const main = api.mainConclusion?.();
     const row = ({ n, indent }) => {
       const parent = t.parentOf.get(n.id), link = t.primary.get(n.id), word = link?.word;
@@ -361,8 +368,9 @@ export function init(api) {
     const unplaced = inboxThoughts.filter(c => !b.nodes.some(n => n.sourceCaptureId === c.id));
     view.innerHTML = `
       <div class="ol-shell">
-        <label class="ol-label" for="ol-title">Question</label>
-        <input id="ol-title" class="ol-title" value="${esc(title)}" placeholder="What are you trying to figure out? (optional, add it later)">
+        ${scope ? `<div class="ol-scope"><span>Inside “${esc(clip(scope.outer, 50))}”</span><button type="button" data-scope-exit>↑ Step out</button></div>` : ''}
+        <label class="ol-label" for="ol-title">${scope ? 'Its question' : 'Question'}</label>
+        <input id="ol-title" class="ol-title" value="${esc(scope ? scope.label : title)}" placeholder="${scope ? 'What does this group answer?' : 'What are you trying to figure out? (optional, add it later)'}">
         ${unplaced.length ? `<div class="ol-inbox"><span>${unplaced.length} thought${unplaced.length === 1 ? '' : 's'} jotted from the side panel</span><button data-add-jots>Add to outline</button></div>` : ''}
         <div class="ol-tree-wrap"><ul class="ol-tree" aria-label="Outline">${rows.map(row).join('')}</ul><svg class="ol-arrows" aria-hidden="true"></svg></div>
         ${rows.length ? '' : '<p class="ol-empty">Nothing here yet. Write whatever you already know or suspect, one thought per line, or paste your notes. Sort it out afterwards.</p>'}
@@ -631,10 +639,13 @@ export function init(api) {
       const id = wordSel.dataset.word;
       change(t => { setWord(id, wordSel.value, t); }, null);
     } else if (e.target.id === 'ol-title') {
-      api.board.title = e.target.value.trim() || DEFAULT_TITLE;
-      api.persist(); api.render();
+      const scope = api.scope?.();
+      if (scope) scope.setLabel(e.target.value.trim());
+      else { api.board.title = e.target.value.trim() || DEFAULT_TITLE; api.persist(); api.render(); }
     }
   });
+
+  view.addEventListener('click', e => { if (e.target.closest('[data-scope-exit]')) api.scope?.()?.exit(); });
 
   view.addEventListener('submit', e => {
     if (e.target.id !== 'ol-jot-form') return;
