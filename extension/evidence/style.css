@@ -327,3 +327,64 @@ body.space-pan #viewport{cursor:grab!important}
 @keyframes drop-hint{from{opacity:.75}to{opacity:1}}
 .drop-target .group-tab{max-width:none;z-index:6}
 .card.dragging{z-index:5;box-shadow:0 14px 34px #0000003d;opacity:.92}
+
+/* Nested groups, focus and far zoom */
+.group-tab .group-focus,.group-tab .group-out{opacity:.7}.group-tab:not(:hover) .group-out,.group-tab:not(:hover) .group-focus{visibility:hidden}
+#canvas.focusing .card:not(.in-focus),#canvas.focusing .group:not(.in-focus),#canvas.focusing .group-card:not(.in-focus){opacity:.13;pointer-events:none!important}
+#canvas.focusing .group:not(.in-focus) .group-tab{pointer-events:none}
+#canvas .faded{opacity:.12}
+#group-crumbs{display:flex;align-items:center;gap:6px;font-size:13px;min-width:0;overflow:hidden}
+#group-crumbs button{min-height:0;padding:2px 8px;border:0;background:transparent;border-radius:5px;color:var(--muted);white-space:nowrap}
+#group-crumbs button:hover{background:var(--rule)}#group-crumbs button[aria-current]{color:var(--ink);font-weight:600;box-shadow:inset 3px 0 0 var(--g)}
+#group-crumbs span{color:var(--muted)}#group-crumbs .crumb-hint{font:11px var(--mono);margin-left:10px;opacity:.7}
+.group-chip.is-outer{opacity:.8;border-style:dashed}.chip-path{color:var(--muted);font-size:12px}
+.group-chip .chip-face{font-size:13px;padding:0 4px 0 0;color:var(--muted)}.group-chip .chip-face.on{color:#b58324}
+.group-chip{padding-left:6px}
+/* Far out: cards reduce to their headline; group labels carry the reading */
+#canvas.far .card .drag-hint,#canvas.far .card .card-inspect,#canvas.far .card .card-edit,#canvas.far .card .card-delete,#canvas.far .card .connect-handle,#canvas.far .card .status,#canvas.far .card .eyebrow,#canvas.far .edge-label,#canvas.far .source-footer,#canvas.far .translation{visibility:hidden}
+#canvas.far .group-tab{font-weight:600}
+.group-card .group-tab{max-width:none}
+/* Compact chrome: navigation in one row, the board's tools in another */
+.compact-chrome .topline{gap:14px;padding:8px 0;min-width:0}
+.compact-chrome .topline .workspace-nav{display:flex;align-items:center;gap:10px;flex:1;min-width:0;border:0;padding:0;margin:0;background:none}
+.compact-chrome .workspace-nav>span[aria-current],.compact-chrome .workspace-nav>label{display:none}
+.compact-chrome .workspace-nav select{max-width:min(360px,30vw)}
+.compact-chrome .workspace-nav button{font-size:13px;padding:5px 10px}
+.compact-chrome #save-status{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.compact-chrome .top-actions{margin-left:0}
+.board-menu{position:relative}.board-menu-list{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;min-width:180px;padding:5px;background:var(--card);border:1px solid var(--rule);border-radius:8px;box-shadow:0 10px 30px #0003}
+.board-menu-list[hidden]{display:none}.board-menu-list button{border:0!important;background:transparent;text-align:left;padding:7px 10px;border-radius:5px}.board-menu-list button:hover{background:var(--rule)}
+.compact-chrome .toolbar:not(:has(.field-inline:not([hidden]))){display:none}
+.compact-chrome .mode-hint{display:none}
+.compact-chrome .board-bar{gap:12px;flex-wrap:wrap;padding-top:4px;padding-bottom:4px}
+.compact-chrome .board-bar .compact-title{flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:14px var(--serif);color:var(--muted)}
+.compact-chrome .board-bar #authorbar{border:0;padding:0;flex-wrap:nowrap;gap:6px}
+.compact-chrome .board-bar #authorbar>span{display:none}
+.compact-chrome .board-bar #authorbar button{font-size:13px;padding:5px 10px}
+.board-bar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
+.board-bar-right button{font-size:13px}.board-bar-right #walk{padding:6px 12px}
+#panel-toggle[aria-pressed=true]{color:var(--green);border-color:var(--green)}
+/* The side panel steps aside when nothing is selected */
+main.panel-idle>#inspector,main.panel-idle>#side-splitter{display:none}
+/* Selected groups */
+.group.selected{border-width:2.5px;border-color:var(--g);box-shadow:0 0 0 3px color-mix(in srgb,var(--g) 30%,transparent)}
+.group.selected .group-tab,.group-card.selected .group-tab{background:var(--g)}.group.selected .group-tab *,.group-card.selected .group-tab *{color:#fff}
+.group-card.selected{outline:2.5px solid var(--g);outline-offset:4px}
+.group-title{box-shadow:inset 4px 0 0 var(--g);padding-left:14px}
+.group-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--g);margin-right:8px}
+/* Far out: headlines keep a readable minimum size (about 11px on screen) */
+#canvas.far .card h3,#canvas.far .card.fact>p,#canvas.far .card.note>p,#canvas.far .card .excerpt{font-size:max(22px,calc(11px * var(--inv,1)));line-height:1.12;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;margin:0}
+#canvas.far .card .source-title,#canvas.far .card .figure,#canvas.far .card .crop,#canvas.far .card .source-head{display:none}
+#canvas.far .group-card-lead{font-size:max(19px,calc(11px * var(--inv,1)));line-height:1.12;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#canvas.far .group-card-count,#canvas.far .group-open{visibility:hidden}
+.compact-chrome .board-bar{gap:8px}.compact-chrome .board-bar .tabs{gap:16px}
+.compact-chrome .board-bar #authorbar button,.board-bar-right button{padding:5px 8px}
+.compact-chrome .board-bar #authorbar #undo,.compact-chrome .board-bar #authorbar #redo{padding:5px 6px}
+#panel-toggle{font-size:15px;line-height:1}
+.compact-chrome .workspace{container-type:inline-size}
+@container (max-width:1050px){.compact-chrome .board-bar .l{display:none}.compact-chrome .board-bar .i{font-size:14px}}
+@container (max-width:760px){.canvas-footer .legend{display:none}}
+.compact-chrome .board-bar .i{display:inline!important}
+.compact-chrome .board-bar #add-toggle span{display:inline!important}
+@container (max-width:1050px){.compact-chrome .board-bar .tabs{gap:12px}.compact-chrome .board-bar #authorbar{gap:4px}.compact-chrome .board-bar #authorbar button,.compact-chrome .board-bar-right button{padding:4px 7px}.compact-chrome .board-bar-right{gap:6px}}
+@container (max-width:1050px){.compact-chrome .board-bar{padding-left:14px;padding-right:12px}}

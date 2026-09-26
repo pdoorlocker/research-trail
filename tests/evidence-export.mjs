@@ -22,6 +22,9 @@ assert.ok(!result.includes('aGVsbG8='),'Original uncropped screenshot must not b
 assert.ok(result.includes('--surface-inset:'),'Shared theme must be embedded');
 const scripts=[...result.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
 assert.equal(scripts.length,2);assert.ok(scripts.every(m=>!m[1].includes('src=')),'No external runtime scripts');
+// Groups nest as a tree: loops, second parents and empty groups are dropped on load.
+context.fixture=structuredClone(seed);{const [a,b]=context.fixture.nodes.map(n=>n.id);context.fixture.groups=[{id:'g1',label:'Outer',members:[a],groups:['g2'],color:0},{id:'g2',label:'Inner',members:[b],groups:['g1'],color:1},{id:'g3',label:'Also claims Inner',members:[],groups:['g2'],color:2},{id:'g4',label:'Empty',members:['missing'],color:3}];}
+{const gs=vm.runInContext('validateBoard(fixture).groups',context),kids=gs.flatMap(g=>g.groups);assert.deepEqual(gs.map(g=>g.id).sort(),['g1','g2']);assert.equal(new Set(kids).size,kids.length);assert.ok(!(gs.find(g=>g.id==='g1').groups.includes('g2')&&gs.find(g=>g.id==='g2').groups.includes('g1')));}
 const exported=JSON.parse(scripts.find(m=>m[1].includes('application/json'))[2]);context.fixture=exported;
 assert.equal(vm.runInContext('validateBoard(fixture).nodes.length',context),2);
 await fs.writeFile('/tmp/things-evidence-reader.mjs',scripts.find(m=>m[1].includes('module'))[2]);
