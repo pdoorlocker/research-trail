@@ -20,28 +20,29 @@ function renderSteps(){
     };li.append(button);$('outline-list').append(li);
   }
   $('outline-present').disabled=!board?.steps.length;
-  $('outline-status').textContent=board?'Your chosen reading order.':'Create a board from Evidence, then arrange its walkthrough.';
+  $('outline-list').dataset.empty=board?(board.steps.length?'':'No walkthrough order yet. Set it with Order steps on the board.'):'No board in this workspace yet. Open board to start one.';
 }
 async function refresh(){const generation=++loading;try{
   const state=await chrome.runtime.sendMessage({type:'get-state'});
-  const id=$('ws-select').value||state.activeJourneyId;
+  const id=state.activeJourneyId;
   const list=id?await db.getByIndex('evidenceBoards','byJourney',id):[];
   if(generation!==loading)return;journeyId=id;records=list;
   const selected=$('outline-board').value;
-  $('outline-board').replaceChildren(...records.map(record=>{const option=document.createElement('option');option.value=record.id;option.textContent=record.content.title;return option;}));
+  $('outline-board').replaceChildren(...records.map(record=>{const option=document.createElement('option');option.value=record.id;option.textContent=record.content.title==='What am I trying to establish?'?'Untitled question':record.content.title;return option;}));
+  $('outline-board').hidden=!records.length;
   if(records.some(b=>b.id===selected))$('outline-board').value=selected;
   renderSteps();
 }catch(error){$('outline-status').textContent=error.message;}}
 $('evidence-btn').onclick=()=>openBoard();$('outline-present').onclick=()=>openBoard(true);$('outline-board').onchange=renderSteps;
 for(const [id,screenshot] of [['outline-capture',false],['outline-screenshot',true]])$(id).onclick=async()=>{
-  $(id).disabled=true;$('outline-status').textContent='Capturing…';
+  $(id).disabled=true;$('outline-status').textContent=screenshot?'Drag a box on the page (Esc cancels)…':'Saving…';
   try{const response=await chrome.runtime.sendMessage({type:'capture-evidence-from-panel',journeyId,screenshot});
-    if(response.error)throw new Error(response.error);
-    $('outline-status').textContent='Saved to the evidence inbox.';
+    if(response.error)throw new Error(response.error==='Select a passage on the page first.'?'Highlight some text on the page first, then click Save selection.':response.error);
+    $('outline-status').textContent=screenshot?'Screenshot saved to the evidence inbox.':'Passage saved to the evidence inbox.';
     showAttach(response.id);
   }catch(error){$('outline-status').textContent=error.message;}finally{$(id).disabled=false;}
 };
-$('ws-select').addEventListener('change',refresh);
+document.addEventListener('workspace-changed',refresh);
 chrome.runtime.onMessage.addListener(msg=>{if(msg.type==='trail-updated')refresh();});
 refresh();setInterval(refresh,10000);
 

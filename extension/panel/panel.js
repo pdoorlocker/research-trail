@@ -59,21 +59,14 @@ async function init() {
   };
   $('park-btn').onclick = async () => {
     const res = await send({ type: 'park-others' });
-    if (res.parked) flashParkButton(`Parked ${res.parked} tab${res.parked === 1 ? '' : 's'}`);
+    flashStatus(res.parked ? `Parked ${res.parked} tab${res.parked === 1 ? '' : 's'}. They stay on the map.` : 'No other captured tabs to park.');
   };
   $('pause-btn').onclick = async () => {
     const state = await send({ type: 'get-state' });
     await send({ type: 'set-paused', paused: !state.paused });
     renderHeader();
   };
-  $('ws-select').onchange = async () => {
-    await send({ type: 'switch-workspace', journeyId: $('ws-select').value });
-    graphSignature = '';
-    cy?.elements().remove();
-    await reload();
-  };
-
-  $('close-btn').onclick = () => window.close();
+  wireChrome();
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'trail-updated' || msg.type === 'tabs-updated') scheduleReload();
@@ -138,20 +131,141 @@ async function renderSuggestNote() {
 
 async function renderHeader(state) {
   if (!state) state = await send({ type: 'get-state' });
-  const select = $('ws-select');
-  const journeys = (await db.getAll('journeys')).sort(workspaceSort);
-  select.textContent = '';
-  for (const j of journeys) {
-    const opt = document.createElement('option');
-    opt.value = j.id;
-    opt.textContent = j.name;
-    select.appendChild(opt);
-  }
-  if (journeyId) select.value = journeyId;
+  $('ws-name').textContent = state.journey?.name || 'Setting up…';
+  $('rec-dot').classList.toggle('paused', !!state.paused);
+  $('ws-toggle').title = state.paused ? 'Paused: nothing is recorded. Click to switch workspace.' : 'Recording into this workspace. Click to switch.';
   const pause = $('pause-btn');
-  pause.textContent = state.paused ? 'Resume' : 'Pause';
-  pause.title = state.paused ? 'Capture paused — click to resume' : 'Pause capture';
-  pause.classList.toggle('paused', state.paused);
+  pause.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
+  pause.title = pause.ariaLabel = state.paused ? 'Resume recording' : 'Pause recording';
+  pause.classList.toggle('on', !!state.paused);
+}
+
+const PAUSE_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="4" y="3.5" width="2.6" height="9" rx=".8" fill="currentColor"/><rect x="9.4" y="3.5" width="2.6" height="9" rx=".8" fill="currentColor"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5 3.5v9l7-4.5z" fill="currentColor"/></svg>';
+
+// ---------- Header menus, dock, star ----------
+
+let amtshelfer = null;
+
+function wireChrome() {
+  // Workspace switcher (same pattern as the popup).
+  const setWsMenu = (open) => {
+    $('ws-menu').hidden = !open;
+    $('ws-toggle').setAttribute('aria-expanded', String(open));
+    if (open) renderWorkspaceList();
+    else { $('ws-new-name').hidden = true; $('ws-new-btn').hidden = false; }
+  };
+  $('ws-toggle').onclick = () => setWsMenu($('ws-menu').hidden);
+  $('ws-new-btn').onclick = () => { $('ws-new-btn').hidden = true; $('ws-new-name').hidden = false; $('ws-new-name').focus(); };
+  $('ws-new').onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $('ws-new-name').value.trim();
+    if (!name) return;
+    await send({ type: 'create-workspace', name });
+    $('ws-new-name').value = '';
+    setWsMenu(false);
+    await switchedWorkspace();
+  };
+  async function renderWorkspaceList() {
+    const state = await send({ type: 'get-state' });
+    const list = $('ws-list');
+    list.textContent = '';
+    for (const j of (await db.getAll('journeys')).sort(workspaceSort)) {
+      const item = document.createElement('button');
+      const current = j.id === state.activeJourneyId;
+      item.className = 'ws-item' + (current ? ' current' : '');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(current));
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = j.name;
+      const count = document.createElement('span');
+      count.className = 'count';
+      const pages = current ? 0 : (await db.getByIndex('nodes', 'byJourney', j.id)).length;
+      count.textContent = current ? '✓' : pages ? `${pages} page${pages === 1 ? '' : 's'}` : '';
+      item.append(name, count);
+      item.onclick = async () => {
+        if (!current) await send({ type: 'switch-workspace', journeyId: j.id });
+        setWsMenu(false);
+        await switchedWorkspace();
+      };
+      list.appendChild(item);
+    }
+  }
+
+  // ⋯ menu.
+  const setMore = (open) => { $('more-menu').hidden = !open; $('more-btn').setAttribute('aria-expanded', String(open)); };
+  $('more-btn').onclick = (e) => { e.stopPropagation(); setMore($('more-menu').hidden); };
+  $('more-menu').addEventListener('click', () => setMore(false));
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.menu-wrap')) setMore(false);
+    if (!e.target.closest('#ws-menu, #ws-toggle')) setWsMenu(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    setMore(false); setWsMenu(false); closeSheet();
+  });
+
+  // Glossary and translation settings open as a sheet over the map.
+  $('glossary-btn').onclick = () => openSheet('Glossary', (body) => amtshelfer?.renderGlossary(body));
+  $('ah-settings-btn').onclick = () => openSheet('Translation settings', (body) => amtshelfer?.renderSettings(body));
+  $('sheet-close').onclick = closeSheet;
+
+  // Dock tabs: this page / board. Remembered.
+  const setDock = (which) => {
+    for (const t of ['page', 'board']) {
+      $(`dock-${t}`).hidden = t !== which;
+      $(`dock-${t}-tab`).setAttribute('aria-selected', String(t === which));
+    }
+    try { localStorage.setItem('panel.dock', which); } catch { /* private mode */ }
+  };
+  for (const tab of document.querySelectorAll('[data-dock]')) tab.onclick = () => setDock(tab.dataset.dock);
+  let saved = 'page';
+  try { saved = localStorage.getItem('panel.dock') || 'page'; } catch { /* private mode */ }
+  setDock(saved === 'board' ? 'board' : 'page');
+
+  renderStar();
+  chrome.tabs.onActivated.addListener(() => renderStar());
+  chrome.tabs.onUpdated.addListener((_id, info) => { if (info.status === 'complete') renderStar(); });
+}
+
+async function switchedWorkspace() {
+  graphSignature = '';
+  cy?.elements().remove();
+  await reload();
+  document.dispatchEvent(new CustomEvent('workspace-changed'));
+}
+
+function openSheet(title, render) {
+  $('sheet-title').textContent = title;
+  $('sheet-body').textContent = '';
+  render($('sheet-body'));
+  $('sheet').hidden = false;
+}
+function closeSheet() { $('sheet').hidden = true; }
+
+async function renderStar() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const btn = $('star-btn');
+  const ok = tab?.url && /^https?:/.test(tab.url);
+  btn.disabled = !ok;
+  if (!ok) { btn.textContent = '☆ Star'; btn.classList.remove('on'); return; }
+  const { starred } = await send({ type: 'star-status', tabId: tab.id });
+  btn.classList.toggle('on', !!starred);
+  btn.textContent = starred ? '★ Starred' : '☆ Star';
+  btn.onclick = async () => {
+    const res = await send({ type: 'star-toggle', tabId: tab.id });
+    if (res?.error) flashStatus(res.error);
+    renderStar();
+  };
+}
+
+// One status line under the dock for whatever just happened.
+let statusTimer = null;
+function flashStatus(text) {
+  $('outline-status').textContent = text;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => { $('outline-status').textContent = ''; }, 4000);
 }
 
 // ---------- Graph ----------
@@ -643,15 +757,6 @@ function renderHere() {
     : 'entry point';
 }
 
-let flashTimer = null;
-function flashParkButton(text) {
-  const btn = $('park-btn');
-  const original = 'Park other tabs';
-  btn.textContent = text;
-  clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { btn.textContent = original; }, 2000);
-}
-
 window.addEventListener('resize', () => {
   if (!cy) return;
   cy.resize();
@@ -673,4 +778,4 @@ new ResizeObserver(() => {
 }).observe(document.getElementById('graph-wrap'));
 
 init();
-mountAmtshelferCard(document.getElementById('amtshelfer-card'));
+amtshelfer = mountAmtshelferCard(document.getElementById('amtshelfer-card'));

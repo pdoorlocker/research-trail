@@ -32,33 +32,35 @@ function el(tag, className, text) {
 
 export function mountAmtshelferCard(container) {
   container.textContent = '';
+  container.classList.add('ah-card');
 
-  const summaryRow = el('div', 'ah-card-head');
-  summaryRow.append(el('span', 'ah-card-title', 'Amtshelfer · DE→EN'));
-  const statusText = el('span', 'ah-card-status', '');
-  summaryRow.append(statusText);
-  container.append(summaryRow);
+  // One translate button that always offers the next step (same as the
+  // popup), with the rarer page controls behind ⋯, then "ask this page".
+  const row = el('div', 'ah-card-row');
+  const translateBtn = el('button', 'ah-card-btn ah-card-main', 'Translate to English');
+  const moreWrap = el('div', 'ah-card-more');
+  const moreBtn = el('button', 'ah-card-btn ah-card-icon', '⋯');
+  moreBtn.setAttribute('aria-label', 'More translation options');
+  moreBtn.setAttribute('aria-haspopup', 'menu');
+  const moreMenu = el('div', 'ah-card-menu');
+  moreMenu.setAttribute('role', 'menu');
+  moreMenu.hidden = true;
+  moreWrap.append(moreBtn, moreMenu);
+  row.append(translateBtn, moreWrap);
+  container.append(row);
+  moreBtn.onclick = (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; };
+  document.addEventListener('click', (e) => { if (!moreWrap.contains(e.target)) moreMenu.hidden = true; });
 
-  // --- per-page status + toggle ---
-  const statusRow = el('div', 'ah-card-row');
-  const toggleBtn = el('button', 'ah-card-btn', '…');
-  const hideBtn = el('button', 'ah-card-btn', '');
-  hideBtn.hidden = true;
-  const reloadBtn = el('button', 'ah-card-btn', 'Reload page');
-  reloadBtn.title = "Reload so the page's own scripts start fresh — translations stay hidden";
-  reloadBtn.hidden = true;
-  reloadBtn.onclick = async () => {
-    const tab = await activeTab();
-    if (tab?.id) chrome.tabs.reload(tab.id);
-    reloadBtn.hidden = true;
-  };
-  statusRow.append(toggleBtn);
-  const hideRow = el('div', 'ah-card-row');
-  hideRow.append(hideBtn, reloadBtn);
-  container.append(statusRow, hideRow);
+  const askRow = el('form', 'ah-card-row');
+  const askInput = el('input', 'ah-card-input');
+  askInput.type = 'text';
+  askInput.placeholder = 'Ask this page: which documents do I need?';
+  askInput.setAttribute('aria-label', 'Ask this page');
+  askRow.append(askInput);
+  container.append(askRow);
 
-  // Action feedback — a silent no-op reads as "broken", so every page
-  // action reports what actually happened.
+  // Action feedback: a silent no-op reads as "broken", so every page action
+  // reports what actually happened.
   const note = el('div', 'ah-card-muted');
   note.hidden = true;
   container.append(note);
@@ -72,79 +74,66 @@ export function mountAmtshelferCard(container) {
 
   async function pageAction(msg) {
     const res = await sendToPage(msg);
-    if (res === null) flash("Amtshelfer can't run on this page (browser-internal or blocked).");
-    else if (res.inactive) flash('Amtshelfer is off on this page — use "Enable on this page" above.');
+    if (res === null) flash('Translation can’t run on this page.');
+    else if (res.inactive) flash('Translation is off on this site. Turn it on under ⋯.');
     return res;
   }
 
-  async function renderStatus() {
-    const status = await sendToPage({ type: 'status' });
-    if (!status) {
-      statusText.textContent = 'n/a on this page';
-      toggleBtn.hidden = hideBtn.hidden = reloadBtn.hidden = true;
-      return;
-    }
-    toggleBtn.hidden = false;
-    statusText.textContent = !status.active ? 'off' : status.hidden ? 'on · translations hidden' : 'on';
-    // Hide/show translations without switching Amtshelfer off.
-    hideBtn.hidden = !status.active || !(status.translated || status.hidden);
-    hideBtn.textContent = status.hidden ? 'Show translations' : 'Hide translations';
-    hideBtn.title = status.hidden
-      ? 'Put saved English translations back on this page'
-      : 'Show the original German on this page and stop re-applying saved translations here (the toolbar stays)';
-    hideBtn.onclick = async () => {
-      const res = await sendToPage({ type: 'setTranslationsHidden', value: !status.hidden });
-      if (res === null) flash('Lost contact with the page — reload the tab and try again.');
-      // Swapping the German back in can't revive page scripts the translation
-      // already broke — a reload can, and the page stays untranslated.
-      reloadBtn.hidden = !(res?.hidden && status.translated);
-      renderStatus();
-    };
-    if (!status.hidden) reloadBtn.hidden = true;
-    toggleBtn.textContent = status.active ? 'Disable on this page' : 'Enable on this page';
-    toggleBtn.onclick = async () => {
-      const res = await sendToPage({ type: 'setOverride', value: status.active ? 'off' : 'on' });
-      if (res === null) flash('Lost contact with the page — reload the tab and try again.');
-      else if (!status.active && !res.active) flash('Could not activate — reload the tab and try again.');
-      renderStatus();
-    };
-  }
-
-  // --- ask-this-page ---
-  const askRow = el('div', 'ah-card-row');
-  const askInput = el('input', 'ah-card-input');
-  askInput.type = 'text';
-  askInput.placeholder = 'Ask this page… ("which documents do I need?")';
-  const askBtn = el('button', 'ah-card-btn ah-card-btn-accent', 'Ask');
-  const ask = async () => {
+  askRow.onsubmit = async (e) => {
+    e.preventDefault();
     const q = askInput.value.trim();
     if (!q) return;
     askInput.value = '';
-    await pageAction({ type: 'pageAsk', q });
+    const res = await pageAction({ type: 'pageAsk', q });
+    if (res && !res.inactive) flash('Asking… the answer appears on the page.');
   };
-  askBtn.onclick = ask;
-  askInput.onkeydown = (e) => { if (e.key === 'Enter') ask(); };
-  askRow.append(askInput, askBtn);
-  container.append(askRow);
 
-  // --- page actions ---
-  const actionsRow = el('div', 'ah-card-row');
-  const translateBtn = el('button', 'ah-card-btn ah-card-btn-primary', 'Translate page');
-  translateBtn.onclick = () => pageAction({ type: 'pageTranslate' });
-  const gistsBtn = el('button', 'ah-card-btn', 'AI gists');
-  gistsBtn.title = 'One local-model pass over the whole page; a one-line English gist appears under each paragraph';
-  gistsBtn.onclick = () => pageAction({ type: 'pageGists' });
-  actionsRow.append(translateBtn, gistsBtn);
-  container.append(actionsRow);
+  async function renderStatus() {
+    const status = await sendToPage({ type: 'status' });
+    container.hidden = !status; // pages it can't run on: nothing to offer
+    if (!status) return;
+    if (status.hidden) {
+      translateBtn.textContent = 'Show English';
+      translateBtn.title = 'Put the saved English translations back on this page';
+      translateBtn.onclick = async () => { await sendToPage({ type: 'setTranslationsHidden', value: false }); renderStatus(); };
+    } else if (status.active && status.translated) {
+      translateBtn.textContent = 'Show German';
+      translateBtn.title = 'Show the original German (your translations stay saved)';
+      translateBtn.onclick = async () => { await sendToPage({ type: 'setTranslationsHidden', value: true }); renderStatus(); };
+    } else {
+      translateBtn.textContent = 'Translate to English';
+      translateBtn.title = 'Translate every paragraph on this page, each with its own DE/EN toggle';
+      translateBtn.onclick = async () => {
+        if (!status.active) await sendToPage({ type: 'setOverride', value: 'on' });
+        await pageAction({ type: 'pageTranslate' });
+        setTimeout(renderStatus, 800);
+      };
+    }
+    const items = [];
+    if (status.active && status.translated && !status.hidden) items.push(['Translate the rest of the page', () => pageAction({ type: 'pageTranslate' })]);
+    if (status.active) items.push(['Add a one-line gist under each paragraph', () => pageAction({ type: 'pageGists' })]);
+    if (status.hidden && status.translated) {
+      items.push(['Reload page (restarts the page’s own scripts)', async () => { const tab = await activeTab(); if (tab?.id) chrome.tabs.reload(tab.id); }]);
+    }
+    items.push([status.active ? 'Turn translation off on this site' : 'Turn translation on for this site', async () => {
+      const res = await sendToPage({ type: 'setOverride', value: status.active ? 'off' : 'on' });
+      if (res === null) flash('Lost contact with the page. Reload the tab and try again.');
+      renderStatus();
+    }]);
+    moreMenu.textContent = '';
+    for (const [label, run] of items) {
+      const b = el('button', null, label);
+      b.setAttribute('role', 'menuitem');
+      b.onclick = () => { moreMenu.hidden = true; run(); };
+      moreMenu.append(b);
+    }
+  }
 
-  // --- glossary ---
-  const glossaryDetails = el('details', 'ah-card-sub');
-  glossaryDetails.append(el('summary', null, 'Glossary'));
-  const glossaryList = el('div', 'ah-card-glossary');
-  glossaryDetails.append(glossaryList);
-  container.append(glossaryDetails);
-
-  async function renderGlossary() {
+  // --- glossary (rendered into the panel's sheet on request) ---
+  let glossaryList = null;
+  async function renderGlossary(body) {
+    if (body) { glossaryList = el('div', 'ah-card-glossary'); body.append(glossaryList); }
+    if (!glossaryList?.isConnected) return;
     const { glossary = {} } = await chrome.storage.local.get('glossary');
     glossaryList.textContent = '';
     const terms = Object.entries(glossary).sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0));
@@ -170,16 +159,11 @@ export function mountAmtshelferCard(container) {
     }
   }
 
-  // --- settings ---
-  const settingsDetails = el('details', 'ah-card-sub');
-  settingsDetails.append(el('summary', null, 'Amtshelfer settings'));
-  const settingsBody = el('div', 'ah-card-settings');
-  settingsDetails.append(settingsBody);
-  container.append(settingsDetails);
-
-  async function renderSettings() {
+  // --- settings (rendered into the panel's sheet on request) ---
+  async function renderSettings(body) {
+    const settingsBody = el('div', 'ah-card-settings');
+    body.append(settingsBody);
     const s = await getSettings();
-    settingsBody.textContent = '';
 
     const mkSelect = (label, key, options, current) => {
       const row = el('label', 'ah-card-setting');
@@ -198,7 +182,7 @@ export function mountAmtshelferCard(container) {
     };
 
     settingsBody.append(mkSelect('Translate with', 'translateBackend', [
-      ['chrome', 'On-device (Chrome)'],
+      ['chrome', 'On-device (Chrome only, not Brave)'],
       ['ollama', 'Ollama (trail model)'],
     ], s.translateBackend || 'chrome'));
     settingsBody.append(mkSelect('Explain with', 'explainBackend', [
@@ -253,12 +237,11 @@ export function mountAmtshelferCard(container) {
   }
 
   renderStatus();
-  renderGlossary();
-  renderSettings();
   // Follow tab switches so the per-page toggle always describes the tab
   // the user is looking at.
   chrome.tabs.onActivated.addListener(renderStatus);
   chrome.tabs.onUpdated.addListener((_id, info) => {
     if (info.status === 'complete') renderStatus();
   });
+  return { renderGlossary, renderSettings };
 }

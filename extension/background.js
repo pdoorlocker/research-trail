@@ -1076,6 +1076,8 @@ async function handleMessage(msg, sender) {
       const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
       const journeyId = msg.journeyId || await ensureActiveWorkspace();
       const capture = await captureEvidence(tab, {}, journeyId, !!msg.screenshot);
+      // Same as right-click → Save passage: the passage shows on the trail too.
+      await recordOnTrail(capture);
       notifyTrailUpdated(journeyId);
       return {id:capture.id};
     }

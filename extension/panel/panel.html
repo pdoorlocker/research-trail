@@ -7,14 +7,34 @@
   <link rel="stylesheet" href="../shared/theme.css">
 </head>
 <body>
+  <!-- The panel stays open while you read: where you are (the map), and the
+       tools you reach for mid-read (the dock). Everything else is one ⋯ away. -->
   <header>
-    <select id="ws-select" title="Workspace"></select>
-    <button id="pause-btn" class="icon" title="Pause page capture (nothing gets recorded until you resume)"></button>
-    <button id="ask-btn" class="icon" title="Ask questions about everything in this workspace">Ask</button>
-    <button id="evidence-btn" class="icon">Evidence</button>
-    <button id="map-btn" class="icon" title="Open the full map">Map</button>
-    <button id="close-btn" class="icon" title="Close panel">Close</button>
+    <button id="ws-toggle" class="ws-toggle" aria-haspopup="listbox" aria-expanded="false" title="Switch workspace">
+      <span id="rec-dot" class="rec-dot" aria-hidden="true"></span>
+      <span id="ws-name" class="ws-name">…</span>
+      <span class="chev" aria-hidden="true">▾</span>
+    </button>
+    <button id="pause-btn" class="icon-btn" aria-label="Pause recording" title="Pause recording"></button>
+    <div class="menu-wrap">
+      <button id="more-btn" class="icon-btn" aria-label="More" aria-haspopup="menu" aria-expanded="false">⋯</button>
+      <div id="more-menu" class="menu" role="menu" hidden>
+        <button id="map-btn" role="menuitem">Open full map</button>
+        <button id="ask-btn" role="menuitem" title="Ask questions about everything in this workspace">Ask this workspace</button>
+        <button id="park-btn" role="menuitem" title="Closes every captured tab except this one. Nothing is lost: the pages stay on the map, one click to reopen.">Park other tabs</button>
+        <hr>
+        <button id="glossary-btn" role="menuitem">Glossary</button>
+        <button id="ah-settings-btn" role="menuitem">Translation settings</button>
+      </div>
+    </div>
   </header>
+  <div id="ws-menu" class="ws-menu" role="listbox" hidden>
+    <div id="ws-list"></div>
+    <form id="ws-new" class="ws-new">
+      <button type="button" id="ws-new-btn" class="ws-new-btn">＋ New workspace</button>
+      <input id="ws-new-name" type="text" placeholder="Name it, then press Enter" maxlength="80" hidden>
+    </form>
+  </div>
 
   <div id="suggest-note" hidden>
     <span id="suggest-note-text"></span>
@@ -29,24 +49,48 @@
       <img id="hover-preview-img" alt="">
       <div id="hover-preview-title"></div>
     </div>
+    <div id="empty" hidden>
+      <p>Browse anywhere. Pages appear here as you go, and this panel always shows where you are in the web of what you've seen.</p>
+    </div>
+    <div id="here" class="here" hidden>
+      <div id="here-from" class="here-from"></div>
+      <div id="here-title" class="here-title"></div>
+    </div>
+    <!-- Glossary and translation settings open over the map. -->
+    <div id="sheet" class="sheet" hidden>
+      <div class="sheet-head"><span id="sheet-title"></span><button id="sheet-close" class="icon-btn" aria-label="Close">✕</button></div>
+      <div id="sheet-body" class="sheet-body"></div>
+    </div>
   </div>
 
-  <div id="empty" hidden>
-    <p>Browse anywhere — pages appear here as you go, and this panel always shows where you are in the web of what you've seen.</p>
-  </div>
+  <section id="dock" class="dock">
+    <div class="dock-tabs" role="tablist">
+      <button id="dock-page-tab" role="tab" aria-selected="true" data-dock="page">This page</button>
+      <button id="dock-board-tab" role="tab" aria-selected="false" data-dock="board">Board</button>
+    </div>
 
-  <footer id="here" hidden>
-    <div id="here-title"></div>
-    <div id="here-from" class="muted"></div>
-  </footer>
+    <div id="dock-page" role="tabpanel">
+      <div class="row">
+        <button id="star-btn" title="Star this page so it’s easy to find again (Alt+S)">☆ Star</button>
+        <button id="outline-capture" title="Highlight text on the page, then click to save it as evidence (same as right-click → Save passage as evidence)">Save selection</button>
+        <button id="outline-screenshot" title="Drag a box around what to save">Screenshot</button>
+      </div>
+      <form id="jot-form" class="jot-form"><input id="jot-input" placeholder="Jot a thought about this page" autocomplete="off" aria-label="Jot a thought"></form>
+      <div id="outline-attach" hidden></div>
+      <div id="amtshelfer-card"></div>
+    </div>
 
-  <div id="actions">
-    <button id="park-btn">Park other tabs</button>
-    <p class="hint">Closes every captured tab except this one. Nothing is lost — the pages stay on the map, one click to reopen.</p>
-  </div>
+    <div id="dock-board" role="tabpanel" hidden>
+      <select id="outline-board" aria-label="Board"></select>
+      <div class="row">
+        <button id="evidence-btn">Open board</button>
+        <button id="outline-present">Walk through</button>
+      </div>
+      <ol id="outline-list"></ol>
+    </div>
 
-  <details id="argument-outline" open><summary>Curated argument</summary><form id="jot-form" class="jot-form"><input id="jot-input" placeholder="Jot a thought…" autocomplete="off" aria-label="Jot a thought"><button>Save</button></form><select id="outline-board" aria-label="Argument"></select><ol id="outline-list"></ol><p id="outline-status"></p><div id="outline-attach" hidden></div><div class="outline-actions"><button id="outline-present">Walk through</button><button id="outline-capture">Capture passage</button><button id="outline-screenshot">Capture screenshot</button></div></details>
-  <div id="amtshelfer-card"></div>
+    <p id="outline-status" class="status" role="status"></p>
+  </section>
 
   <script src="../vendor/cytoscape.min.js"></script>
   <script src="../vendor/layout-base.js"></script>
