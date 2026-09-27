@@ -239,8 +239,19 @@ function onBoot() {
   // pins first, and auto-return's destination. Installs that predate the
   // Scratch concept never had one.
   ensureScratch();
+  recolorWorkspaceGroups().catch(() => {});
 }
 chrome.runtime.onInstalled.addListener(onBoot);
+
+// Existing tab groups take their workspace's current color (Scratch is grey).
+async function recolorWorkspaceGroups() {
+  const wsGroups = await sget('wsGroups', {});
+  for (const [key, gid] of Object.entries(wsGroups)) {
+    const journey = await db.get('journeys', key.slice(key.indexOf(':') + 1));
+    if (!journey || !isScratch(journey)) continue;
+    try { await chrome.tabGroups.update(gid, { color: 'grey' }); } catch { /* group gone */ }
+  }
+}
 // Reloading or updating the extension closes its pages: reopen the boards
 // that were open, each at its last view.
 chrome.runtime.onInstalled.addListener((details) => {
@@ -418,10 +429,14 @@ async function switchWorkspace(journeyId, { collapse = true } = {}) {
 
 const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange', 'grey'];
 
-function groupColorFor(journeyId) {
+// Scratch is grey, the quiet catch-all; named workspaces get a hashed color
+// from the rest (grey is kept for Scratch alone).
+function groupColorFor(journey) {
+  if (journey && isScratch(journey)) return 'grey';
   let h = 0;
-  for (const ch of journeyId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return GROUP_COLORS[h % GROUP_COLORS.length];
+  for (const ch of journey?.id || '') h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const color = GROUP_COLORS[h % GROUP_COLORS.length];
+  return color === 'grey' ? 'cyan' : color;
 }
 
 async function ensureTabInWorkspaceGroup(tabId, journeyId) {
@@ -442,7 +457,11 @@ async function ensureTabInWorkspaceGroup(tabId, journeyId) {
   let groupId = wsGroups[key];
   if (groupId != null) {
     try {
-      await chrome.tabGroups.get(groupId);
+      const group = await chrome.tabGroups.get(groupId);
+      // Groups made before Scratch turned grey catch up here.
+      const journey = await db.get('journeys', journeyId);
+      const color = groupColorFor(journey);
+      if (group.color !== color && journey && isScratch(journey)) await chrome.tabGroups.update(groupId, { color });
     } catch {
       groupId = null;
     }
@@ -456,7 +475,7 @@ async function ensureTabInWorkspaceGroup(tabId, journeyId) {
       groupId = await chrome.tabs.group({ tabIds: tabId, createProperties: { windowId: tab.windowId } });
       await chrome.tabGroups.update(groupId, {
         title: journey?.name || 'Research Trail',
-        color: groupColorFor(journeyId),
+        color: groupColorFor(journey),
       });
       wsGroups[key] = groupId;
       await sset('wsGroups', wsGroups);
