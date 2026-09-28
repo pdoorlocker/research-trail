@@ -6,14 +6,29 @@
 
 import * as db from '../lib/db.js';
 import { mountAmtshelferCard } from '../amtshelfer/card.js';
-import { baseDomain, faviconUrl, truncate, workspaceSort } from '../lib/util.js';
+import {
+  baseDomain, faviconUrl, truncate, workspaceSort,
+  isScratchJourney, makeConnectorClassifier, isFillerPage,
+} from '../lib/util.js';
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
 
 let journeyId = null;
+let allNodes = []; // the whole workspace; `nodes` is what the map shows
 let nodes = [];
 let edges = [];
+let topics = [];
+let scratch = false;
+
+// Scratch is every page you've ever browsed — drawn whole it's a hairball.
+// So the panel shows ONE theme: by default whichever theme the page you're
+// on belongs to (null), or a theme you picked (its id), or '__themes' (the
+// list), or '__all' (everything, minus filler unless showFiller). Ephemeral
+// like domainScope: a lens, not a setting.
+let scratchScope = null;
+let showFiller = false;
+let lastScopeKey = '';
 let tabMap = { byNode: {}, activeNodeId: null };
 let cy = null;
 let graphSignature = '';
@@ -94,20 +109,171 @@ async function reload() {
   if (!journeyId) return;
   if (switched) {
     domainScope.clear(); // a lens on one workspace makes no sense on another
+    scratchScope = null;
+    showFiller = false;
     if (cy) {
       cy.elements().remove();
       graphSignature = '';
     }
   }
-  nodes = await db.getByIndex('nodes', 'byJourney', journeyId);
+  allNodes = await db.getByIndex('nodes', 'byJourney', journeyId);
   edges = await db.getByIndex('edges', 'byJourney', journeyId);
   tabMap = await send({ type: 'tab-map' });
+  scratch = isScratchJourney(state.journey);
+  topics = scratch ? await db.getByIndex('topics', 'byJourney', journeyId) : [];
+  const view = scratch ? scratchView() : { kind: 'workspace', nodes: allNodes };
+  nodes = view.nodes;
+  // A different slice is a different map: lay it out fresh rather than
+  // incrementally morphing one theme's layout into another's.
+  const scopeKey = `${view.kind}:${view.topicId || ''}`;
+  if (scopeKey !== lastScopeKey) {
+    lastScopeKey = scopeKey;
+    domainScope.clear();
+    if (cy) {
+      hideHoverPreview();
+      cy.elements().remove();
+      graphSignature = '';
+    }
+  }
   renderHeader(state);
+  renderScope(view);
   renderDomainStrip();
   renderGraph();
   renderHere();
   renderSuggestNote();
-  $('empty').hidden = nodes.length > 0;
+  $('empty').hidden = allNodes.length > 0;
+}
+
+// ---------- Scratch scope ----------
+
+function scratchView() {
+  const live = new Set(topics.map((t) => t.id));
+  const themeOf = (n) => (n.topicId && live.has(n.topicId) ? n.topicId : null);
+  if (scratchScope && !scratchScope.startsWith('__') && !live.has(scratchScope)) {
+    scratchScope = null; // picked theme got merged away or promoted
+  }
+  const active = allNodes.find((n) => n.id === tabMap.activeNodeId);
+  const topicId = scratchScope === null
+    ? (active && themeOf(active))
+    : (scratchScope.startsWith('__') ? null : scratchScope);
+  if (topicId) {
+    return {
+      kind: 'theme', topicId, pinned: scratchScope !== null,
+      nodes: allNodes.filter((n) => themeOf(n) === topicId),
+    };
+  }
+  if (scratchScope === '__all') {
+    const isConn = makeConnectorClassifier(edges);
+    const filler = allNodes.filter((n) => !themeOf(n) && isFillerPage(n, isConn));
+    const hide = new Set(filler.map((n) => n.id));
+    hide.delete(tabMap.activeNodeId); // "you are here" always shows
+    return {
+      kind: 'all',
+      fillerCount: filler.length,
+      nodes: showFiller ? allNodes : allNodes.filter((n) => !hide.has(n.id)),
+    };
+  }
+  return {
+    kind: 'themes',
+    reason: scratchScope === null ? (active ? 'unthemed' : 'none') : 'picked',
+    nodes: [],
+  };
+}
+
+function setScratchScope(scope) {
+  scratchScope = scope;
+  reload();
+}
+
+function renderScope(view) {
+  const bar = $('scope-bar');
+  $('themes-view').hidden = view.kind !== 'themes' || !allNodes.length;
+  if (!scratch) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const label = $('scope-label');
+  const action = $('scope-action');
+  label.textContent = '';
+  action.hidden = true;
+  $('scope-themes').hidden = view.kind === 'themes';
+  $('scope-themes').onclick = () => setScratchScope('__themes');
+
+  const count = (n) => {
+    const c = document.createElement('span');
+    c.className = 'count';
+    c.textContent = `${n} page${n === 1 ? '' : 's'}`;
+    return c;
+  };
+  if (view.kind === 'theme') {
+    const name = topics.find((t) => t.id === view.topicId)?.name || 'Organizing…';
+    label.append(name, count(view.nodes.length));
+    label.title = view.pinned ? name : `${name} — the theme of the page you're on`;
+    if (view.pinned) {
+      action.hidden = false;
+      action.textContent = 'Follow page';
+      action.title = 'Show whichever theme the page you are on belongs to';
+      action.onclick = () => setScratchScope(null);
+    }
+  } else if (view.kind === 'all') {
+    label.append('All pages', count(view.nodes.length));
+    label.title = '';
+    if (view.fillerCount) {
+      action.hidden = false;
+      action.textContent = showFiller ? 'Hide filler' : `+ ${view.fillerCount} filler`;
+      action.title = showFiller
+        ? 'Hide searches, logins, carts and app screens with no readable text'
+        : 'Also show searches, logins, carts and app screens with no readable text';
+      action.onclick = () => { showFiller = !showFiller; reload(); };
+    }
+  } else {
+    label.append('Themes');
+    label.title = '';
+    if (scratchScope !== null && tabMap.activeNodeId) {
+      action.hidden = false;
+      action.textContent = 'Follow page';
+      action.title = 'Show whichever theme the page you are on belongs to';
+      action.onclick = () => setScratchScope(null);
+    }
+    renderThemesList(view.reason);
+  }
+}
+
+function renderThemesList(reason) {
+  $('themes-note').textContent = reason === 'unthemed'
+    ? "This page isn't in a theme yet. Pick one to look at:"
+    : reason === 'none'
+      ? 'Pick a theme to see its map.'
+      : '';
+  $('themes-note').hidden = reason === 'picked';
+  const list = $('themes-list');
+  list.textContent = '';
+  const groups = new Map(topics.map((t) => [t.id, []]));
+  for (const n of allNodes) groups.get(n.topicId)?.push(n);
+  const last = (ns) => Math.max(0, ...ns.map((n) => n.visits[n.visits.length - 1]?.at ?? n.createdAt));
+  const entries = topics
+    .filter((t) => groups.get(t.id).length)
+    .sort((a, b) => last(groups.get(b.id)) - last(groups.get(a.id)));
+  for (const t of entries) {
+    const item = document.createElement('button');
+    item.className = 'theme-item';
+    const name = document.createElement('span');
+    name.className = 'name' + (t.name ? '' : ' pending');
+    name.textContent = t.name || 'Organizing…';
+    const c = document.createElement('span');
+    c.className = 'count';
+    c.textContent = groups.get(t.id).length;
+    item.append(name, c);
+    item.onclick = () => setScratchScope(t.id);
+    list.appendChild(item);
+  }
+  const all = document.createElement('button');
+  all.className = 'theme-item all';
+  all.textContent = 'All pages, without filler';
+  all.title = 'Everything in Scratch except searches, logins, carts and app screens with no readable text';
+  all.onclick = () => setScratchScope('__all');
+  list.appendChild(all);
 }
 
 // A split suggestion for the active workspace shows as a small amber note;
@@ -742,7 +908,7 @@ function placeNewNodes(addedEls) {
 
 function renderHere() {
   const footer = $('here');
-  const node = nodes.find((n) => n.id === tabMap.activeNodeId);
+  const node = allNodes.find((n) => n.id === tabMap.activeNodeId);
   if (!node) {
     footer.hidden = true;
     return;
@@ -752,7 +918,7 @@ function renderHere() {
   const inbound = edges.find(
     (e) => e.to === node.id && (e.type === 'navigated' || e.type === 'branched'),
   );
-  const parent = inbound && nodes.find((n) => n.id === inbound.from);
+  const parent = inbound && allNodes.find((n) => n.id === inbound.from);
   $('here-from').textContent = parent
     ? `${inbound.type === 'branched' ? 'new tab from' : 'from'} ${truncate(parent.title || parent.host, 52)}`
     : 'entry point';

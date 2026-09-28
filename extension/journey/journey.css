@@ -277,6 +277,7 @@ button:disabled { opacity: .5; cursor: default; }
   font-size: 12.5px;
   padding: 4px 10px;
 }
+#filler-toggle { font-size: 12.5px; padding: 4px 10px; }
 #topic-name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Synthesis panel ---- */

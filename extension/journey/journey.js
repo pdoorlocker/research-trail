@@ -3,7 +3,7 @@
 import * as db from '../lib/db.js';
 import {
   baseDomain, formatDuration, faviconUrl, getSettings, saveSettings, truncate,
-  makeConnectorClassifier, thinPage, isEmbeddable,
+  makeConnectorClassifier, thinPage, isEmbeddable, isFillerPage,
 } from '../lib/util.js';
 import { ASK_SYSTEM_PROMPT, buildIndexBlock, buildDetailBlock } from '../lib/ask.js';
 import { chatStream } from '../lib/ollama.js';
@@ -40,6 +40,11 @@ const topicsRequested = new Set(); // scratch workspaces we've asked to organize
 let allNodes = []; // unfiltered; `nodes` is the topic-filtered view in Scratch
 let topics = [];
 let selectedTopicId = null; // which Scratch topic's map is open (null = topic list)
+// "Not yet organized" is mostly filler (searches, logins, text-less app
+// screens) the organizer can't place by design; its map hides that unless
+// asked, so the pages that COULD still cluster aren't buried.
+let showUnsortedFiller = false;
+let unsortedFillerCount = 0;
 let activeSuggestion = null; // split suggestion being previewed
 let previewActive = false;
 let scratchLiteActive = false; // viewing Scratch while lite processing is on
@@ -64,6 +69,12 @@ async function init() {
   wirePreview();
   wireSearch();
   wireAsk();
+  $('filler-toggle').onclick = () => {
+    showUnsortedFiller = !showUnsortedFiller;
+    graphSignature = '';
+    cy?.elements().remove();
+    loadData(journey.id);
+  };
   $('topics-back').onclick = () => {
     selectedTopicId = null;
     graphSignature = '';
@@ -179,6 +190,17 @@ async function loadData(id) {
         ? !n.topicId || !topics.some((t) => t.id === n.topicId)
         : n.topicId === selectedTopicId))
     : allNodes;
+  unsortedFillerCount = 0;
+  if (scratch && selectedTopicId === '__unsorted') {
+    const isConn = makeConnectorClassifier(edges);
+    const filler = new Set(nodes.filter((n) => isFillerPage(n, isConn)).map((n) => n.id));
+    unsortedFillerCount = filler.size;
+    if (!showUnsortedFiller) nodes = nodes.filter((n) => !filler.has(n.id));
+  }
+  const fillerBtn = $('filler-toggle');
+  fillerBtn.hidden = !unsortedFillerCount;
+  fillerBtn.textContent = showUnsortedFiller ? 'Hide filler' : `Show ${unsortedFillerCount} filler pages`;
+  fillerBtn.title = 'Searches, logins, carts and app screens with no readable text: pages the organizer never groups on their own';
 
   const state = await send({ type: 'get-state' });
   tabMap = state.activeJourneyId === id
@@ -356,6 +378,15 @@ async function openSearchResult(entry) {
   }
   if (isScratchJourney(journey)) {
     const target = entry.topicId || '__unsorted';
+    // A search hit on a filler page must actually land on the map.
+    if (target === '__unsorted' && !showUnsortedFiller) {
+      const isConn = makeConnectorClassifier(await db.getByIndex('edges', 'byJourney', journey.id));
+      const n = await db.get('nodes', entry.id);
+      if (n && isFillerPage(n, isConn)) {
+        showUnsortedFiller = true;
+        selectedTopicId = null; // force the reload below
+      }
+    }
     if (selectedTopicId !== target) {
       selectedTopicId = target;
       graphSignature = '';

@@ -237,6 +237,15 @@ export function makeConnectorClassifier(edges) {
     || (n.visits.length >= 4 && visitDaySpan(n) >= 2);
 }
 
+// Filler: a page the organizer can never place on its own — no readable
+// text to compare, or a utility/hub page barred from binding. Scratch maps
+// hide unthemed filler by default: it's most of ambient browsing by count
+// and none of it by meaning. (Filler a neighbor labeled into a theme shows
+// with that theme — the search that led into a thread belongs on its map.)
+export function isFillerPage(n, isConnector) {
+  return thinPage(n) || !isEmbeddable(n) || isConnector(n);
+}
+
 export function formatDuration(seconds) {
   if (!seconds || seconds < 1) return '0s';
   if (seconds < 60) return `${Math.round(seconds)}s`;

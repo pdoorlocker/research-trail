@@ -43,10 +43,21 @@
     <button id="suggest-open">Review</button>
   </div>
 
+  <!-- Scratch only: which slice of Scratch the map is showing. -->
+  <div id="scope-bar" hidden>
+    <button id="scope-themes" class="scope-btn" title="Every theme in Scratch">‹ Themes</button>
+    <span id="scope-label" class="scope-label"></span>
+    <button id="scope-action" class="scope-btn" hidden></button>
+  </div>
+
   <div id="domain-strip" hidden></div>
 
   <div id="graph-wrap">
     <div id="cy"></div>
+    <div id="themes-view" hidden>
+      <p id="themes-note" class="themes-note"></p>
+      <div id="themes-list"></div>
+    </div>
     <div id="hover-preview" hidden>
       <img id="hover-preview-img" alt="">
       <div id="hover-preview-title"></div>
