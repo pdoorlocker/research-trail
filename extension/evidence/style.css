@@ -373,9 +373,9 @@ main.panel-idle>#inspector,main.panel-idle>#side-splitter{display:none}
 .group-title{box-shadow:inset 4px 0 0 var(--g);padding-left:14px}
 .group-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--g);margin-right:8px}
 /* Far out: headlines keep a readable minimum size (about 11px on screen) */
-#canvas.far .card h3,#canvas.far .card.fact>p,#canvas.far .card.note>p,#canvas.far .card .excerpt{font-size:max(22px,calc(11px * var(--inv,1)));line-height:1.12;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;margin:0}
+#canvas.far .card h3,#canvas.far .card.fact>p,#canvas.far .card.note>p,#canvas.far .card .excerpt{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;margin:0}
 #canvas.far .card .source-title,#canvas.far .card .figure,#canvas.far .card .crop,#canvas.far .card .source-head{display:none}
-#canvas.far .group-card-lead{font-size:max(19px,calc(11px * var(--inv,1)));line-height:1.12;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#canvas.far .group-card-lead{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
 #canvas.far .group-card-count,#canvas.far .group-open{visibility:hidden}
 .compact-chrome .board-bar{gap:8px}.compact-chrome .board-bar .tabs{gap:16px}
 .compact-chrome .board-bar #authorbar button,.board-bar-right button{padding:5px 8px}
@@ -400,3 +400,81 @@ main.panel-idle>#inspector,main.panel-idle>#side-splitter{display:none}
 .quick-add{max-width:280px}
 .group-card{margin-top:calc(30px * var(--gz,1) - 4px)}
 .inbox-star{color:#d9a441}
+
+/* ---------- Stacking and resizing (Board and Desk) ---------- */
+#canvas .group-card{z-index:9000}
+#canvas svg.edge-labels{z-index:9500}
+.card.dragging{z-index:9900!important}
+#canvas .marquee{z-index:9990}
+.card-resize{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:ew-resize;opacity:0;transition:opacity .15s;z-index:2;
+  background:linear-gradient(135deg,transparent 45%,var(--muted) 45%,var(--muted) 55%,transparent 55%,transparent 70%,var(--muted) 70%,var(--muted) 80%,transparent 80%)}
+.card:hover .card-resize,.card.selected .card-resize{opacity:.7}
+.card-resize:hover{opacity:1!important}
+
+/* ---------- Desk: the board full screen, nothing else ---------- */
+body.desk header,body.desk #header-splitter,body.desk .board-bar,body.desk #authorbar,body.desk .canvas-footer,
+body.desk main>aside,body.desk #side-splitter,body.desk #outline-view,body.desk #source-list,body.desk #walkthrough{display:none!important}
+body.desk main,body.desk .workspace{height:100dvh}
+body.desk #viewport{display:block!important;background-image:none;background-color:var(--desk-surface,#e9e5dc)}
+@media(prefers-color-scheme:dark){body.desk #viewport{background-color:var(--desk-surface-dark,#1b1e1a)}}
+:root[data-theme="dark"] body.desk #viewport{background-color:#1b1e1a}
+
+/* Cards read as paper: quieter chrome, a soft resting shadow, lifted while carried. */
+body.desk .card{box-shadow:0 1px 2px #0000001f,0 3px 10px #00000014;transition:box-shadow .18s ease,transform .18s ease}
+body.desk .card .drag-hint,body.desk .card .card-inspect{display:none}
+body.desk .card .card-edit,body.desk .card .card-delete,body.desk .card .connect-handle{opacity:0;transition:opacity .15s}
+body.desk .card:hover .card-edit,body.desk .card:hover .card-delete,body.desk .card:hover .connect-handle,body.desk .card.selected .card-edit{opacity:1}
+body.desk .card.dragging{transform:scale(1.015);box-shadow:0 14px 34px #00000038,0 3px 8px #0000001f}
+
+/* Each kind of card is its own kind of paper. */
+body.desk .card.claim{background:#fffdf7;border-color:#e2dccd;border-top:3px solid #7aa38a}
+body.desk .card.fact{background:#f3efe6;border-color:#ddd6c6}
+body.desk .card.note{background:#fdf6d8;border-color:#ebdea5}
+body.desk .card.gap{background:transparent;border:1.5px dashed #a79b82}
+body.desk .card.conclusion{background:#eef4ee;border:1.5px solid #3f8a63}
+body.desk .card.conclusion::before{content:"";position:absolute;top:-5px;left:50%;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#3f8a63;box-shadow:0 1px 2px #0005}
+body.desk .card.evidence{background:#fff;border-color:#e4e0d6}
+body.desk .card.evidence .source-head{background:transparent;border-bottom:1px solid #eee9de}
+body.desk .card.evidence .excerpt{font-style:italic}
+body.desk .card.evidence .crop{padding:8px 8px 0;background:#fff}
+@media(prefers-color-scheme:dark){
+  body.desk .card.claim{background:#2b2f29;border-color:#3d4238;border-top-color:#7aa38a}
+  body.desk .card.fact{background:#262a24;border-color:#393e35}
+  body.desk .card.note{background:#34321f;border-color:#4a4629}
+  body.desk .card.conclusion{background:#22322a;border-color:#6fae8c}
+  body.desk .card.evidence,body.desk .card.evidence .crop{background:#2e312c;border-color:#40443b}
+  body.desk .card.evidence .source-head{border-bottom-color:#40443b}
+}
+
+/* The Desk's one control: fades in at the bottom when you reach for it. */
+.desk-bar{position:fixed;left:50%;bottom:18px;transform:translate(-50%,12px);z-index:50;display:none;align-items:center;gap:6px;
+  padding:6px 6px 6px 14px;border-radius:12px;background:var(--card);border:1px solid var(--rule);box-shadow:0 10px 30px #0003;
+  opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;max-width:calc(100vw - 32px)}
+body.desk .desk-bar{display:flex}
+.desk-bar.shown,.desk-bar:hover{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.desk-title{font:500 14px var(--serif);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:6px}
+.desk-bar button{font-size:13px;padding:5px 10px;min-height:0}
+.desk-zoom{display:flex;align-items:center;gap:2px}.desk-zoom button{border:0;background:transparent;padding:4px 8px}
+#desk-zoom-label{font:12px var(--mono);min-width:40px;text-align:center}
+
+/* Readable at any zoom: below 100%, card text keeps about the size it has
+   when you'd zoom in to read it (headlines ~16px on screen, the rest ~14px);
+   cards grow taller instead. Far out (below 50%) they also drop their chrome
+   and clip to five lines. */
+#canvas.scaled .card.claim h3,#canvas.scaled .card.conclusion h3{font-size:max(24px,calc(16px * var(--inv,1)));line-height:1.18}
+#canvas.scaled .card.gap h3{font-size:max(17px,calc(14px * var(--inv,1)));line-height:1.3}
+#canvas.scaled .card.fact>p,#canvas.scaled .card.note>p{font-size:max(16px,calc(14px * var(--inv,1)));line-height:1.3}
+#canvas.scaled .card .excerpt{font-size:max(20px,calc(14px * var(--inv,1)));line-height:1.3}
+#canvas.scaled .card .eyebrow{font-size:max(11.5px,calc(11px * var(--inv,1)))}
+#canvas.scaled .group-card-lead{font-size:max(19px,calc(16px * var(--inv,1)));line-height:1.2}
+
+/* Card types read at a glance: a colored type label with a swatch. */
+.card.claim{--type:#3f8a63}.card.conclusion{--type:#2e7d57}.card.fact{--type:#7c8a96}.card.note{--type:#c29a1f}.card.gap{--type:#8766b5}
+.card .eyebrow,.card.note .eyebrow{display:flex;align-items:center;gap:6px;font-weight:600;letter-spacing:.07em;color:var(--type,var(--muted))}
+.card .eyebrow::before{content:"";flex:none;width:.75em;height:.75em;border-radius:2px;background:var(--type,var(--muted))}
+@media(prefers-color-scheme:dark){.card.claim{--type:#7fbf98}.card.conclusion{--type:#8fd0a9}.card.fact{--type:#a3b1bd}.card.note{--type:#e0bf55}.card.gap{--type:#b39ddb}}
+/* Enlarged text grows cards taller; cap it so close neighbours overlap less. */
+#canvas.scaled .card.fact>p,#canvas.scaled .card.note>p,#canvas.scaled .card.gap h3,#canvas.scaled .card .excerpt{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#canvas.scaled .card.claim h3,#canvas.scaled .card.conclusion h3{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+/* Far out the type label is hidden, so the card's type shows as its left edge. */
+#canvas.far .card:not(.evidence){border-left:5px solid var(--type,var(--rule))}

@@ -279,7 +279,7 @@ export function init(api) {
     const known = api.cardSize?.(n.id);
     if (known) return known.h;
     const el = document.querySelector(`#canvas [data-node="${CSS.escape(n.id)}"]`);
-    return el && !el.closest('#canvas.far') ? el.offsetHeight : estimate(n);
+    return el && !el.closest('#canvas.scaled') ? el.offsetHeight : estimate(n);
   }
 
   function layout(measured) {
@@ -322,7 +322,8 @@ export function init(api) {
   api.requestLayout = () => { needsLayout = true; };
   api.onRender(() => {
     if (laying) return;
-    if (api.tab === 'map' && needsLayout) {
+    // On the Desk nothing moves unless you move it; the layout waits for the Board.
+    if (api.tab === 'map' && needsLayout && !api.desk) {
       needsLayout = false;
       laying = true;
       try { if (layout(true)) { api.commit(false); api.render(); } } finally { laying = false; }
