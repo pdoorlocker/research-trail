@@ -46,7 +46,8 @@
     },
     "star-page": {
       "suggested_key": {
-        "default": "Alt+S"
+        "default": "Ctrl+Shift+S",
+        "mac": "MacCtrl+Shift+S"
       },
       "description": "Star the page you're on (or unstar it)"
     }

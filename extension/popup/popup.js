@@ -109,7 +109,7 @@ async function renderStar(tab) {
   const { starred } = await send({ type: 'star-status', tabId: tab.id });
   btn.classList.toggle('on', !!starred);
   btn.textContent = starred ? '★ Starred' : '☆ Star';
-  btn.title = starred ? 'Starred: click to unstar (Alt+S)' : 'Star this page so it’s easy to find again (Alt+S)';
+  btn.title = starred ? 'Starred: click to unstar (Ctrl+Shift+S)' : 'Star this page so it’s easy to find again (Ctrl+Shift+S)';
   btn.onclick = async () => {
     const res = await send({ type: 'star-toggle', tabId: tab.id });
     if (res?.error) { btn.textContent = 'Can’t star this page'; btn.title = res.error; return; }

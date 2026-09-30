@@ -364,6 +364,7 @@ export function init(api) {
           ${hint ? `<span class="ol-hint">${hint}</span>` : ''}
           ${n.type === 'conclusion' ? (main?.id === n.id ? '<span class="ol-answer">answers the question</span>' : `${api.isInterim(n) ? '<span class="ol-source">interim</span>' : ''}<button class="ol-make-answer" data-answer="${esc(n.id)}" title="Make this the conclusion that answers the question">★ make this the answer</button>`) : ''}
           <button class="ol-add-also" data-also="${esc(n.id)}" title="Also connect this line to another line (or type @ in the line)">+ also</button>
+          ${n.type !== 'evidence' ? `<button class="ol-doc ${n.note ? 'has-notes' : ''}" data-doc="${esc(n.id)}" title="${n.note ? 'Read or write its notes' : 'Write notes for this line'}" aria-label="Notes">¶</button>` : ''}
           <button class="ol-open" data-open="${esc(n.id)}" title="Open the full editor (notes, source link, screenshot)" aria-label="Edit details">✎</button>
         </div>
         ${extras.map(l => `<button class="ol-also" data-goto="${esc(l.to)}" data-link="${esc(l.id)}">↳ also, ${esc(api.wordLabel(l.word, api.get(l.to).type))}: ${(o => o.type === 'evidence' ? '“' + esc(clip(textOf(o), 60)) + '”' : esc(clip(o.text, 60)))(api.get(l.to))}</button>`).join('')}
