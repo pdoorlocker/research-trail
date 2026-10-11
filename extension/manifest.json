@@ -3,6 +3,12 @@
   "name": "Research Trail",
   "version": "0.1.0",
   "description": "Map your research journeys: track how pages connect, add commentary, and get local AI summaries via Ollama.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "storage",
     "unlimitedStorage",
@@ -59,6 +65,12 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Research Trail"
+    "default_title": "Research Trail",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }
