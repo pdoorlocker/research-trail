@@ -45,7 +45,7 @@
   // our own panels/labels (the section-preview label once registered itself
   // as a translatable block).
   const OWN_UI_SELECTOR = '.ah-explain, .ah-gist, .ah-chip, #ah-banner, #ah-toast, ' +
-    '#ah-agent-panel, #ah-toolbar-host, #ah-section-box, #ah-select-panel';
+    '#ah-agent-panel, #ah-toolbar-host, #ah-chip-host, #ah-section-box, #ah-select-panel';
   const MIN_LEN = 25;
   const MIN_LEN_HEADING = 4;
   const MIN_LEN_INLINE = 3;
@@ -425,11 +425,22 @@
   }
 
   // Links, buttons, and other clickable controls: we only swap their visible
-  // text, never their attributes or handlers, and the DE/EN chip is placed
-  // *outside* the element (as a sibling) so it can't interfere with the
-  // control's own click/navigation.
+  // text, never their attributes or handlers.
   function isInteractive(el) {
     return el.matches('a[href], button, summary, label, input, select, [role="button"], [onclick]');
+  }
+
+  // Whether a translated element may wear the green margin bar and tint.
+  // Only paragraph-like blocks in normal flow can: on a button the tint
+  // wiped the page's own fill (white text on white), and the bar's padding
+  // widened labels and items in flex rows, pushing their neighbours around.
+  // Everything else is translated with no styling of its own.
+  function isParagraphLike(el) {
+    if (isInteractive(el) || el.matches('td, th, legend, caption')) return false;
+    const display = getComputedStyle(el).display;
+    if (display !== 'block' && display !== 'list-item') return false;
+    const parent = el.parentElement;
+    return !parent || !/flex|grid/.test(getComputedStyle(parent).display);
   }
 
   // `saved` is a pageStore entry: enHtml (present when the block had markup
@@ -442,10 +453,11 @@
   }
 
   // Marks a block whose content ALREADY shows English (translated in place,
-  // markup intact) — just the classes and the toggle chip.
+  // markup intact) — just the classes, plus the chip if it is hovered.
   function finalizeEnglish(el) {
     el.classList.add('ah-translated', 'ah-showing-en');
-    attachChip(el);
+    el.classList.toggle('ah-para', isParagraphLike(el));
+    refreshChip(el);
   }
 
   function showGerman(el) {
@@ -453,7 +465,7 @@
     if (html == null) return;
     el.innerHTML = html;
     el.classList.remove('ah-showing-en');
-    attachChip(el);
+    refreshChip(el);
     underlineGlossaryTerms(el);
   }
 
@@ -466,23 +478,89 @@
     }
   }
 
-  function attachChip(el) {
-    el._ahChip?.remove();
-    const chip = document.createElement('button');
-    chip.className = 'ah-chip';
-    chip.type = 'button';
-    chip.textContent = el.classList.contains('ah-showing-en') ? 'DE' : 'EN';
-    chip.title = el.classList.contains('ah-showing-en')
-      ? 'Show original German'
-      : 'Show English translation';
-    chip.addEventListener('click', e => {
+  // ---------- DE/EN chip (overlay) ----------
+
+  // One floating chip, drawn in its own layer over the page like the
+  // toolbar, sitting on the bottom-right corner of whatever is hovered: a
+  // translated block (DE/EN toggle) or a dropdown/submit input (EN opens its
+  // cheat sheet). Chips used to be inserted into the page beside each
+  // element, which pushed flex rows apart, split radio buttons from their
+  // labels and spilled nav links over the content below.
+  let chipHost = null, chipBtn = null, chipEl = null, chipHideTimer = null;
+
+  function buildChip() {
+    chipHost = document.createElement('div');
+    chipHost.id = 'ah-chip-host';
+    chipHost.style.cssText =
+      'position:absolute;z-index:2147483646;display:none;top:0;left:0;';
+    const shadow = chipHost.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+      <style>
+        button {
+          all: unset; cursor: pointer; display: block; padding: 1px 5px;
+          border-radius: 4px; user-select: none;
+          font: 600 9.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+          letter-spacing: .04em; color: #fff; background: #3f8a63;
+          box-shadow: 0 0 0 1px #fff, 0 1px 4px rgba(0,0,0,.3);
+        }
+        button:hover { background: #2f6e4e; }
+      </style>
+      <button type="button"></button>`;
+    chipBtn = shadow.querySelector('button');
+    chipBtn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      toggleLanguage(el);
+      if (!chipEl) return;
+      if (chipEl._ahCheat) { chipEl._ahCheat.onClick(chipBtn); return; }
+      toggleLanguage(chipEl);
+      updateToolbar(chipEl);
     });
-    el._ahChip = chip;
-    if (isInteractive(el)) el.after(chip);
-    else el.appendChild(chip);
+    chipHost.addEventListener('mouseenter', () => {
+      clearTimeout(chipHideTimer);
+      clearTimeout(hideTimer);
+    });
+    chipHost.addEventListener('mouseleave', () => {
+      scheduleChipHide();
+      scheduleHide();
+    });
+    document.documentElement.appendChild(chipHost);
+  }
+
+  function placeChip(el) {
+    if (!chipHost) return;
+    const cheat = el._ahCheat;
+    if (!cheat && !el.classList.contains('ah-translated')) { hideChip(); return; }
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) { hideChip(); return; }
+    clearTimeout(chipHideTimer);
+    chipEl = el;
+    const en = el.classList.contains('ah-showing-en');
+    chipBtn.textContent = cheat || !en ? 'EN' : 'DE';
+    chipBtn.title = cheat ? cheat.title : en ? 'Show original German' : 'Show English translation';
+    chipHost.style.display = 'block';
+    const w = chipBtn.offsetWidth || 22;
+    const h = chipBtn.offsetHeight || 16;
+    const vw = innerWidth || document.documentElement.clientWidth || 1280;
+    const left = Math.max(4, Math.min(r.right - w + 6, vw - w - 4));
+    chipHost.style.top = r.bottom - h / 2 + scrollY + 'px';
+    chipHost.style.left = left + scrollX + 'px';
+  }
+
+  function hideChip() {
+    clearTimeout(chipHideTimer);
+    if (chipHost) chipHost.style.display = 'none';
+    chipEl = null;
+  }
+
+  function scheduleChipHide() {
+    clearTimeout(chipHideTimer);
+    chipHideTimer = setTimeout(hideChip, 350);
+  }
+
+  // After a block changes language (or is translated while hovered), the
+  // chip's label and position follow it.
+  function refreshChip(el) {
+    if (el === chipEl || el === currentBlock) placeChip(el);
   }
 
   // ---------- markup-preserving translation ----------
@@ -494,9 +572,33 @@
   // its wrapped <input>). Icons/inputs/media are never touched at all — this
   // is what keeps wizard answer buttons and React UIs working after a
   // translation pass. Formatting inside a plain run (bold, <br>) is
-  // flattened, same as translation always did.
+  // flattened, same as translation always did — except for two kinds of
+  // element that would visibly break if merged into a run:
+  //  - markers: tiny letterless elements like a form's required-field
+  //    <abbr class="label_required">*</abbr>, kept in place with their
+  //    styling instead of fusing a bare "*" onto the English word;
+  //  - separate layout items: anything not plain inline, or spaced off by
+  //    its own margin/padding (header pieces like "Abmelden" · name · ID).
+  //    Merged, their spacing vanished ("Log outPeter Durlacher…"), so each
+  //    one is translated on its own, inside the element.
+  // units.structured says whether anything had to be preserved; if not,
+  // the block can be translated as one plain text.
+  const LETTER = /[a-zA-ZäöüÄÖÜß]/;
+  const isMarker = n => {
+    const t = norm(n.textContent || '');
+    return !!t && t.length <= 3 && !LETTER.test(t);
+  };
+  const holdsMarker = n => [...n.querySelectorAll('*')].some(c => !c.children.length && isMarker(c));
+  function isSeparateItem(n) {
+    const cs = getComputedStyle(n);
+    if (cs.display !== 'inline') return n.tagName !== 'BR';
+    return parseFloat(cs.marginLeft) + parseFloat(cs.marginRight) +
+      parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) > 0;
+  }
+
   function translationUnits(el) {
     const units = [];
+    units.structured = false;
     const walk = parent => {
       let run = [];
       const flush = () => {
@@ -505,7 +607,7 @@
         run = [];
         const raw = nodes.map(n => n.textContent ?? '').join('');
         const text = norm(raw);
-        if (!text || !/[a-zA-ZäöüÄÖÜß]/.test(text)) return; // bare prices/pipes: leave as-is
+        if (!text || !LETTER.test(text)) return; // bare prices/pipes: leave as-is
         // Keep the run's edge whitespace so translated text doesn't fuse
         // with an adjacent link ("apply here:⟪a⟫" instead of "apply here: ⟪a⟫").
         const lead = /^\s/.test(raw) ? ' ' : '';
@@ -531,13 +633,17 @@
         if (node.nodeType !== 1 && node.nodeType !== 3) continue;
         if (node.nodeType === 1 &&
             (node.classList.contains('ah-chip') || node.classList.contains('ah-gist') ||
-             node.classList.contains('ah-explain') || node.matches(SKIP_KEEP_SELECTOR))) {
+             node.classList.contains('ah-explain') || node.matches(SKIP_KEEP_SELECTOR) ||
+             isMarker(node))) {
           flush();
+          units.structured = true;
           continue; // keep untouched, no text worth translating inside
         }
         if (node.nodeType === 1 &&
-            (node.matches(KEEP_SELECTOR) || node.querySelector(KEEP_SELECTOR + ',' + SKIP_KEEP_SELECTOR))) {
+            (node.matches(KEEP_SELECTOR) || node.querySelector(KEEP_SELECTOR + ',' + SKIP_KEEP_SELECTOR) ||
+             holdsMarker(node) || isSeparateItem(node))) {
           flush();
+          units.structured = true;
           walk(node); // translate the text inside, keep the element itself
           continue;
         }
@@ -593,7 +699,7 @@
     if (!originalHtml.has(el)) originalHtml.set(el, el.innerHTML);
     const units = translationUnits(el);
     try {
-      if (units.length <= 1 && !el.querySelector(KEEP_SELECTOR + ',' + SKIP_KEEP_SELECTOR)) {
+      if (units.length <= 1 && !units.structured) {
         // Plain block: whole-text translation, streaming straight into it.
         const en = await translateText(blockText(el), partial => {
           if (el.isConnected) el.textContent = partial;
@@ -644,8 +750,7 @@
   // Nearest preceding heading, walking up through ancestors — gives the model
   // the section the passage sits in.
   // Context sent to the model should be the original German even when a
-  // block is currently showing its translation (whose text also includes the
-  // appended DE/EN chip label).
+  // block is currently showing its translation.
   function germanText(el) {
     return pageStore[el.dataset?.ahHash]?.de || blockText(el);
   }
@@ -929,7 +1034,7 @@
   // Translating <option> text IN PLACE is unsafe: forms without value
   // attributes submit the label text itself (classic on old servlet-era
   // Austrian gov forms), and page JS often reads option text for its own
-  // logic. So the dropdown is never modified — an EN chip beside it opens a
+  // logic. So the dropdown is never modified — an EN chip on it opens a
   // read-only panel mapping each German option to English; the user still
   // picks in the real (German) dropdown.
   const SELECT_MAX_OPTIONS = 100;
@@ -938,18 +1043,10 @@
     return [...sel.options].map(o => norm(o.textContent)).filter(Boolean).slice(0, SELECT_MAX_OPTIONS);
   }
 
+  // The EN chip itself is the shared overlay chip, shown while the control
+  // is hovered (see placeChip) — never inserted into the form's layout.
   function attachCheatChip(el, title, onClick) {
-    const chip = document.createElement('button');
-    chip.className = 'ah-chip ah-select-chip';
-    chip.type = 'button';
-    chip.textContent = 'EN';
-    chip.title = title;
-    chip.addEventListener('click', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      onClick(chip);
-    });
-    el.after(chip);
+    el._ahCheat = { title, onClick };
   }
 
   function registerSelect(sel) {
@@ -1247,9 +1344,17 @@
   let hoverHandlers = null;
   function wireHover() {
     const over = e => {
+      if (chipHost?.contains(e.target)) return;
       const el = e.target?.closest?.('[data-ah-hash]');
       if (el) showToolbarFor(el);
       else if (currentBlock && !toolbarHost.contains(e.target)) scheduleHide();
+      // The innermost thing with a chip wins: a dropdown inside a
+      // translated label gets its cheat-sheet chip, not the label's toggle.
+      const cheat = e.target?.closest?.('[data-ah-select]');
+      const chipFor = cheat || (el?.classList.contains('ah-translated') ? el : null);
+      if (!chipFor) scheduleChipHide();
+      else if (chipFor !== chipEl || chipHost.style.display === 'none') placeChip(chipFor);
+      else clearTimeout(chipHideTimer);
     };
     const selch = () => {
       if (currentBlock) updateToolbar(currentBlock);
@@ -1942,6 +2047,7 @@
     active = true;
     await loadState();
     if (!toolbarHost) buildToolbar();
+    if (!chipHost) buildChip();
     scanBlocks();
     wireHover();
     maybeShowBanner();
@@ -2008,17 +2114,21 @@
       if (el.classList.contains('ah-showing-en') && originalHtml.has(el)) {
         el.innerHTML = originalHtml.get(el);
       }
-      el._ahChip?.remove();
-      el.classList.remove('ah-translated', 'ah-showing-en', 'ah-read', 'ah-hover',
+      el.classList.remove('ah-translated', 'ah-showing-en', 'ah-para', 'ah-read', 'ah-hover',
         'ah-explained', 'ah-agent-hit', 'ah-busy');
       delete el.dataset.ahHash;
       delete el.dataset.ahAgentN;
     }
     document.querySelectorAll('.ah-term').forEach(s => s.replaceWith(s.textContent));
-    document.querySelectorAll('.ah-gist, .ah-explain, .ah-chip, #ah-agent-panel, #ah-banner, #ah-toast, #ah-toolbar-host, #ah-section-box')
+    document.querySelectorAll('.ah-gist, .ah-explain, .ah-chip, #ah-agent-panel, #ah-banner, #ah-toast, #ah-toolbar-host, #ah-chip-host, #ah-section-box')
       .forEach(n => n.remove());
     closeSelectPanel();
-    document.querySelectorAll('[data-ah-select]').forEach(s => delete s.dataset.ahSelect);
+    document.querySelectorAll('[data-ah-select]').forEach(s => {
+      delete s.dataset.ahSelect;
+      delete s._ahCheat;
+    });
+    clearTimeout(chipHideTimer);
+    chipHost = chipBtn = chipEl = null;
     sectionBox = null;
     currentSection = null;
     toolbarHost = toolbarShadow = toolbarEl = null;
@@ -2053,8 +2163,8 @@
     }
     // Recapture on the next apply — the page may change the German meanwhile.
     originalHtml.delete(el);
-    el._ahChip?.remove();
-    el.classList.remove('ah-translated', 'ah-showing-en');
+    el.classList.remove('ah-translated', 'ah-showing-en', 'ah-para');
+    refreshChip(el);
     underlineGlossaryTerms(el);
   }
 
