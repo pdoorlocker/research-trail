@@ -2073,10 +2073,13 @@
       for (const root of roots) {
         if (root.dataset?.ahHash) continue;
         const before = new Set(root.querySelectorAll('[data-ah-hash]'));
-        scanBlocks(root);
         // scanBlocks looks inside a root; the root itself may be a block too.
+        // Register it first, as a whole-page scan would (outer before inner):
+        // scanning first let a link inside an added <p> register as its own
+        // block, so it was translated alone and again inside the paragraph.
         if (root.matches(BLOCK_SELECTOR)) registerBlock(root);
         else if (root.matches(INLINE_SELECTOR)) registerInline(root);
+        scanBlocks(root);
         if (root.dataset.ahHash) fresh.push(root);
         for (const el of root.querySelectorAll('[data-ah-hash]')) if (!before.has(el)) fresh.push(el);
       }
