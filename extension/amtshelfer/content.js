@@ -1500,7 +1500,14 @@
     // than the visible article. Translating those through a local LLM is what
     // made whole-page passes take minutes. Hidden blocks still translate on
     // hover if they're ever revealed.
-    if (pageTranslating) return;
+    // One pass at a time. A whole-page pass through a large local model can
+    // run for minutes, and returning silently here made "Translate section"
+    // look dead in the meantime — say why instead. (The follow-mode
+    // observer checks pageTranslating itself, so it never gets here.)
+    if (pageTranslating) {
+      toast('Still translating — try again once the current pass finishes.');
+      return;
+    }
     pageTranslating = true;
     try {
       const found = untranslatedVisibleIn(root || document, root);
@@ -1541,7 +1548,10 @@
   // saved translation on the page — read marks and explanations stay — and
   // translates from scratch.
   async function retranslatePage() {
-    if (pageTranslating) return;
+    if (pageTranslating) {
+      toast('Still translating — try again once the current pass finishes.');
+      return;
+    }
     if (translationsHidden) await setTranslationsHidden(false);
     document.querySelectorAll('[data-ah-hash].ah-translated').forEach(revertToGerman);
     await forgetEnglish(Object.keys(pageStore));

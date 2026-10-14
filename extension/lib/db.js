@@ -73,7 +73,10 @@ function openDb() {
 function txDone(tx) {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    // tx.error is still null while the failing request's error bubbles up
+    // (it's only set once the transaction aborts), so read the request's own
+    // error — otherwise callers just see "null".
+    tx.onerror = (e) => reject(e.target?.error || tx.error || new Error('IndexedDB request failed'));
     tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
   });
 }

@@ -736,7 +736,18 @@ async function upsertNode(journeyId, canon, rawUrl) {
     highlights: [],
     createdAt: Date.now(),
   };
-  await db.put('nodes', node);
+  try {
+    await db.put('nodes', node);
+  } catch (e) {
+    // onCommitted and onHistoryStateUpdated can both reach here for the same
+    // page (form wizards that post and then push history): both miss the
+    // lookup above, and the second put trips the unique byJourneyUrl index.
+    // The node exists now — use it.
+    if (e?.name !== 'ConstraintError') throw e;
+    const winner = await db.getOneByIndex('nodes', 'byJourneyUrl', [journeyId, canon]);
+    if (!winner) throw e;
+    return winner;
+  }
   return node;
 }
 
