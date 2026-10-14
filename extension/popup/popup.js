@@ -155,6 +155,9 @@ async function renderTranslate() {
   if (status.active && status.translated && !status.hidden) {
     items.push(['Translate the rest of the page', async () => { await ahSend({ type: 'pageTranslate' }); window.close(); }]);
   }
+  if (status.active && (status.translated || status.hidden)) {
+    items.push(['Clear saved translations and translate again', async () => { await ahSend({ type: 'pageRetranslate' }); window.close(); }]);
+  }
   if (status.hidden && status.translated) {
     items.push(['Reload page (restarts the page’s own scripts)', async () => { const t = await activeTab(); if (t?.id) chrome.tabs.reload(t.id); window.close(); }]);
   }

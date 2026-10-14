@@ -194,6 +194,18 @@
     });
   }
 
+  // Drops the saved English for these blocks but keeps everything else on
+  // the entry (read marks, explanations).
+  function forgetEnglish(hashes) {
+    for (const hash of hashes) {
+      const entry = pageStore[hash];
+      if (entry) { delete entry.en; delete entry.enHtml; }
+    }
+    return persist(pages => {
+      pages[pageKey] = pageStore;
+    });
+  }
+
   function saveGlossary() {
     return persist(() => {});
   }
@@ -1524,6 +1536,18 @@
     }
   }
 
+  // "Translate whole page" re-applies saved English, so a bad translation
+  // (wrong model, shifted batch) would stick forever. This throws away every
+  // saved translation on the page — read marks and explanations stay — and
+  // translates from scratch.
+  async function retranslatePage() {
+    if (pageTranslating) return;
+    if (translationsHidden) await setTranslationsHidden(false);
+    document.querySelectorAll('[data-ah-hash].ah-translated').forEach(revertToGerman);
+    await forgetEnglish(Object.keys(pageStore));
+    await translateWholePage();
+  }
+
   // Chrome's on-device translator is a fast local call per unit with no
   // network hop, so a simple loop is already quick — no batching needed.
   async function translateBlocksChrome(blocks, hiddenNote = '') {
@@ -1617,6 +1641,19 @@
         stop();
       }
       if (!res?.ok) {
+        // Streamed items were applied (and finished blocks saved) before
+        // the final check could reject the reply, e.g. for shifted
+        // numbering. Put this chunk's blocks back to German and drop the
+        // English cached for them, so a toggle can't bring it back.
+        await Promise.all(applied.values());
+        const touched = [...new Set(chunk.map(entry => entry.job))].filter(job => job.ens.some(Boolean));
+        for (const job of touched) {
+          // Restore explicitly: a half-done block isn't marked ah-showing-en
+          // yet, so revertToGerman alone would leave its English in place.
+          job.el.innerHTML = originalHtml.get(job.el);
+          revertToGerman(job.el);
+        }
+        forgetEnglish(touched.map(job => job.el.dataset.ahHash));
         toast((res?.error || 'Translation failed.') + (res?.hint ? ' ' + res.hint : ''), true);
         return false;
       }
@@ -1695,6 +1732,12 @@
         stop();
       }
       if (!res?.ok) {
+        // Drop this chunk's streamed gists — a rejected reply (e.g. shifted
+        // numbering) may have put them under the wrong paragraphs.
+        for (const block of chunk) {
+          const next = block.el.nextElementSibling;
+          if (next?.classList?.contains('ah-gist')) next.remove();
+        }
         toast((res?.error || 'Gists failed.') + (res?.hint ? ' ' + res.hint : ''), true);
         return;
       }
@@ -2059,6 +2102,7 @@
         .then(() => translateWholePage());
       sendResponse({ ok: true });
     }
+    if (msg?.type === 'pageRetranslate') { retranslatePage(); sendResponse({ ok: true }); }
     if (msg?.type === 'pageGists') { toggleGists(); sendResponse({ ok: true }); }
     if (msg?.type === 'pageAsk' && msg.q) { askPage(msg.q); sendResponse({ ok: true }); }
   });

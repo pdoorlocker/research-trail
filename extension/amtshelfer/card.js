@@ -111,6 +111,12 @@ export function mountAmtshelferCard(container) {
     }
     const items = [];
     if (status.active && status.translated && !status.hidden) items.push(['Translate the rest of the page', () => pageAction({ type: 'pageTranslate' })]);
+    if (status.active && (status.translated || status.hidden)) {
+      items.push(['Clear saved translations and translate again', async () => {
+        await pageAction({ type: 'pageRetranslate' });
+        setTimeout(renderStatus, 800);
+      }]);
+    }
     if (status.active) items.push(['Add a one-line gist under each paragraph', () => pageAction({ type: 'pageGists' })]);
     if (status.hidden && status.translated) {
       items.push(['Reload page (restarts the page’s own scripts)', async () => { const tab = await activeTab(); if (tab?.id) chrome.tabs.reload(tab.id); }]);

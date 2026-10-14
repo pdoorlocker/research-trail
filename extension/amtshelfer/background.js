@@ -257,26 +257,42 @@ function parseAgentReply(res, validBlock) {
 // {n, …} object as soon as it fully appears in the partial JSON, then parse
 // the finished response as the authoritative result.
 async function streamBatch(msg, s, arrayKey, itemKey, prompt, temperature, post, signal, includeGoal) {
-  const parts = [];
-  if (msg.context?.title) parts.push(`Page: ${msg.context.title}`);
+  // The user message holds ONLY the numbered blocks. Page title and goal
+  // used to sit above them as unnumbered lines, and the model would
+  // sometimes take the title for snippet 1 and number every reply one too
+  // high — each translation then landed on the following element. They go
+  // in the system prompt instead, clearly marked as context.
+  const extra = [];
+  if (msg.context?.title) extra.push(`Page title (context only — NOT a snippet, do not include it): ${msg.context.title}`);
   if (includeGoal) {
     const ctx = await journeyContext(null);
-    if (ctx.goal) parts.push(`The user's current research goal: ${ctx.goal}`);
+    if (ctx.goal) extra.push(`The user's current research goal: ${ctx.goal}`);
   }
-  parts.push(msg.blocks.map((b) => `[${b.n}] ${b.text}`).join('\n\n'));
+  const system = extra.length ? prompt + '\n\n' + extra.join('\n') : prompt;
+  const user = msg.blocks.map((b) => `[${b.n}] ${b.text}`).join('\n\n');
 
   const emitted = new Set();
-  const res = await ollamaChat(prompt, parts.join('\n\n'), s, temperature, 'json', (_delta, text) => {
+  const res = await ollamaChat(system, user, s, temperature, 'json', (_delta, text) => {
     for (const item of extractStreamItems(text, itemKey, emitted)) post({ item });
   }, signal);
   if (!res.ok) return res;
+  let items;
   try {
-    const data = JSON.parse(res.text);
-    if (!Array.isArray(data[arrayKey])) throw new Error('no ' + arrayKey + ' array');
-    return { ok: true, [arrayKey]: data[arrayKey], backend: res.backend };
+    items = JSON.parse(res.text)[arrayKey];
+    if (!Array.isArray(items)) throw new Error('no ' + arrayKey + ' array');
   } catch {
     return { ok: false, error: 'The model returned malformed JSON — try again.' };
   }
+  // A number past the end, or one used twice, means the model shifted its
+  // numbering — applying it would put every answer on the wrong block.
+  const seen = new Set();
+  for (const { n } of items) {
+    if (!Number.isInteger(n) || n < 1 || n > msg.blocks.length || seen.has(n)) {
+      return { ok: false, error: 'The model mixed up which text goes where — try again.' };
+    }
+    seen.add(n);
+  }
+  return { ok: true, [arrayKey]: items, backend: res.backend };
 }
 
 // Pulls completed {"n":X,"<key>":"..."} objects out of a *partial* JSON
