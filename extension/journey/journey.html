@@ -8,7 +8,7 @@
 </head>
 <body>
   <header id="topbar">
-    <span class="logo">The Things We Learned</span>
+    <span class="logo">Research Trail</span>
     <select id="journey-select" title="Switch workspace"></select>
     <span id="status-chip" class="chip"></span>
     <div class="menu-wrap" id="search-wrap">
@@ -185,6 +185,13 @@
     <div class="row">
       <button id="s-retry-jobs">Retry failed AI jobs</button>
       <button id="s-delete-journey" class="danger">Delete this journey</button>
+    </div>
+    <h3 class="settings-section">Backup</h3>
+    <p class="muted small">One file with everything: all workspaces, pages, notes, evidence boards, settings, glossary and translations. Restoring replaces what’s here now. Use it before moving or renaming the extension folder: Chrome treats the moved folder as a new, empty extension.</p>
+    <div class="row">
+      <button id="s-backup">Back up everything…</button>
+      <button id="s-restore" class="danger">Restore from backup…</button>
+      <input id="s-restore-file" type="file" accept=".json,application/json" hidden>
     </div>
     <div class="row right">
       <button id="s-cancel">Cancel</button>

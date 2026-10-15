@@ -7,6 +7,7 @@ import {
 } from '../lib/util.js';
 import { ASK_SYSTEM_PROMPT, buildIndexBlock, buildDetailBlock } from '../lib/ask.js';
 import { chatStream } from '../lib/ollama.js';
+import { exportAll, importAll, describeBackup, validate } from '../lib/backup.js';
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -2490,6 +2491,43 @@ function wireSettings() {
     localStorage.removeItem(askKey(journey.id));
     modal.close();
     location.href = 'journey.html';
+  };
+
+  $('s-backup').onclick = async () => {
+    try {
+      const backup = await exportAll();
+      const stamp = backup.exportedAt.slice(0, 10);
+      download(`research-trail-backup-${stamp}.json`, JSON.stringify(backup), 'application/json');
+      toast(`Backup saved: ${describeBackup(backup)}.`);
+    } catch (e) {
+      toast(`Backup failed: ${e.message || e}`);
+    }
+  };
+
+  $('s-restore').onclick = () => $('s-restore-file').click();
+  $('s-restore-file').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+      validate(backup);
+    } catch (err) {
+      toast(err instanceof SyntaxError ? 'That file isn’t valid JSON.' : err.message);
+      return;
+    }
+    if (!window.confirm(`Replace everything in Research Trail with this backup from ${backup.exportedAt.slice(0, 10)}?\n\n` +
+      `It has ${describeBackup(backup)}.\n\nWhat's here now will be overwritten.`)) return;
+    try {
+      const skipped = await importAll(backup);
+      if (skipped.length) window.alert(`Restored. Skipped data this version doesn't know: ${skipped.join(', ')}.`);
+      // Restart the worker and every extension page so nothing keeps the
+      // pre-restore state in memory.
+      chrome.runtime.reload();
+    } catch (err) {
+      toast(`Restore failed, nothing was changed in the trail data: ${err.message || err}`);
+    }
   };
 }
 

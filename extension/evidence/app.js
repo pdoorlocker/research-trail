@@ -824,7 +824,7 @@ function syncUrl(){
 async function initializeWorkspaceUI(){
   window.history.replaceState(null,'','?'+new URLSearchParams({...Object.fromEntries(new URLSearchParams(location.search)),j:session.journey.id,b:session.record.id}));
   $('.brand').href='../journey/journey.html?j='+encodeURIComponent(session.journey.id);
-  $('.brand').innerHTML='<span class="brandmark">▧</span> THE THINGS WE LEARNED';
+  $('.brand').innerHTML='<span class="brandmark">▧</span> RESEARCH TRAIL';
   $('.brand').setAttribute('aria-label','Return to browsing trail');
   $('.topline').insertAdjacentHTML('afterend','<nav class="workspace-nav"><a id="trail-link">Browsing trail</a><span aria-current="page">Evidence board</span><label for="board-picker">Argument</label><select id="board-picker"></select><button id="inbox-button">Evidence inbox</button></nav>');
   $('#trail-link').href='../journey/journey.html?j='+encodeURIComponent(session.journey.id);

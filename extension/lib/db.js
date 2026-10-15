@@ -159,3 +159,32 @@ export async function deleteWhere(store, indexName, key) {
   await txDone(tx);
   return matches.length;
 }
+
+// Every record in every store, for a full backup: { version, stores: { name: [...] } }.
+export async function dumpAll() {
+  const db = await openDb();
+  const names = [...db.objectStoreNames];
+  const tx = db.transaction(names);
+  const stores = {};
+  await Promise.all(names.map(async (name) => {
+    stores[name] = await reqResult(tx.objectStore(name).getAll());
+  }));
+  return { version: db.version, stores };
+}
+
+// Replace the contents of every store with a backup's, in one transaction, so
+// a failed restore leaves the existing data untouched. Stores the backup
+// doesn't mention are emptied too; stores this version doesn't know are
+// returned so the caller can say what was skipped.
+export async function restoreAll(stores) {
+  const db = await openDb();
+  const names = [...db.objectStoreNames];
+  const tx = db.transaction(names, 'readwrite');
+  for (const name of names) {
+    const os = tx.objectStore(name);
+    os.clear();
+    for (const rec of stores[name] || []) os.put(rec);
+  }
+  await txDone(tx);
+  return Object.keys(stores).filter((name) => !names.includes(name));
+}
